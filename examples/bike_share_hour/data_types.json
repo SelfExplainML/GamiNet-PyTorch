@@ -1,0 +1,13 @@
+{"season":{"type":"categorical"},
+ "yr":{"type":"categorical"},
+ "mnth":{"type":"categorical"},
+ "hr":{"type":"continuous"},
+ "holiday":{"type":"categorical"},
+ "weekday":{"type":"categorical"},
+ "workingday":{"type":"categorical"},
+ "weathersit":{"type":"categorical"},
+ "temp":{"type":"continuous"},
+ "atemp":{"type":"continuous"},
+ "hum":{"type":"continuous"},
+ "windspeed":{"type":"continuous"},
+ "cnt":{"type":"target"}}

@@ -1,0 +1,8 @@
+examples/.ipynb_checkpoints/*
+scripts/*
+.ipynb_checkpoints/*
+gaminet/__pycache__/*
+interpret/*.ipynb
+build/*
+gaminet.egg-info/*
+dist/*
