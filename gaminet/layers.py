@@ -39,6 +39,14 @@ class TensorLayer(torch.nn.Module):
         self.all_biases = torch.nn.ParameterList(all_biases)
         self.all_weights = torch.nn.ParameterList(all_weights)
 
+    def individual_forward(self, inputs, idx):
+
+        xs = inputs
+        for i in range(self.n_hidden_layers):
+            xs = self.activation_func(torch.matmul(xs, self.all_weights[i][idx]) + self.all_biases[i][idx])
+        outputs = torch.matmul(xs, self.all_weights[-1][idx]) + self.all_biases[-1][idx]
+        return outputs
+
     def forward(self, inputs):
 
         xs = inputs
@@ -46,9 +54,9 @@ class TensorLayer(torch.nn.Module):
             xs = self.activation_func(torch.matmul(xs, self.all_weights[i])
                               + torch.reshape(self.all_biases[i], [self.n_subnets, 1, -1]))
 
-        out = torch.matmul(xs, self.all_weights[-1]) + torch.reshape(self.all_biases[-1], [self.n_subnets, 1, -1])
-        out = torch.squeeze(torch.transpose(out, 0, 1), dim=2)
-        return out
+        outputs = torch.matmul(xs, self.all_weights[-1]) + torch.reshape(self.all_biases[-1], [self.n_subnets, 1, -1])
+        outputs = torch.squeeze(torch.transpose(outputs, 0, 1), dim=2)
+        return outputs
 
 
 class UnivariateOneHotEncodingLayer(torch.nn.Module):
@@ -83,8 +91,8 @@ class UnivariateOneHotEncodingLayer(torch.nn.Module):
 
 class pyGAMNet(torch.nn.Module):
 
-    def __init__(self, nfeature_index_list, cfeature_index_list, num_classes_list,
-                 subnet_arch=[40, 40], activation_func=torch.nn.ReLU(), device="cpu"):
+    def __init__(self, nfeature_index_list, cfeature_index_list, num_classes_list, subnet_arch, activation_func, device):
+
         super(pyGAMNet, self).__init__()
 
         self.nfeature_index_list = nfeature_index_list
@@ -174,16 +182,17 @@ class pyInteractionNet(torch.nn.Module):
 class pyGAMINet(torch.nn.Module):
 
     def __init__(self, nfeature_index_list, cfeature_index_list, num_classes_list,
-                 hidden_layer_sizes_main_effect, hidden_layer_sizes_interaction, activation_func=torch.nn.ReLU(),
-                 heredity=True, mono_increasing_list=None, mono_decreasing_list=None, device="cpu"):
+                 subnet_size_main_effect, subnet_size_interaction, activation_func,
+                 heredity, mono_increasing_list, mono_decreasing_list, device):
+
         super(pyGAMINet, self).__init__()
 
         self.n_features = len(nfeature_index_list) + len(cfeature_index_list)
         self.nfeature_index_list = nfeature_index_list
         self.cfeature_index_list = cfeature_index_list
         self.num_classes_list = num_classes_list
-        self.hidden_layer_sizes_main_effect= hidden_layer_sizes_main_effect
-        self.hidden_layer_sizes_interaction= hidden_layer_sizes_interaction
+        self.subnet_size_main_effect = subnet_size_main_effect
+        self.subnet_size_interaction = subnet_size_interaction
         self.activation_func= activation_func
         self.heredity = heredity
         self.mono_increasing_list = mono_increasing_list
@@ -194,7 +203,7 @@ class pyGAMINet(torch.nn.Module):
         self.main_effect_blocks = pyGAMNet(nfeature_index_list=nfeature_index_list,
                                  cfeature_index_list=cfeature_index_list,
                                  num_classes_list=num_classes_list,
-                                 subnet_arch=hidden_layer_sizes_main_effect,
+                                 subnet_arch=subnet_size_main_effect,
                                  activation_func=activation_func,
                                  device=device)
         self.main_effect_weights = torch.nn.Parameter(torch.empty(size=(self.n_features, 1),
@@ -217,7 +226,7 @@ class pyGAMINet(torch.nn.Module):
                              nfeature_index_list=self.nfeature_index_list,
                              cfeature_index_list=self.cfeature_index_list,
                              num_classes_list=self.num_classes_list,
-                             subnet_arch=self.hidden_layer_sizes_interaction,
+                             subnet_arch=self.subnet_size_interaction,
                              activation_func=self.activation_func,
                              device=self.device)
             self.interaction_weights = torch.nn.Parameter(torch.empty(size=(self.n_interactions, 1),
@@ -234,7 +243,7 @@ class pyGAMINet(torch.nn.Module):
             return mono_loss
 
         grad = torch.autograd.grad(outputs=torch.sum(outputs),
-                           inputs=inputs, create_graph=True)[0]
+                          inputs=inputs, create_graph=True)[0]
         if len(self.mono_increasing_list) > 0:
             mono_loss = mono_loss + torch.mean(torch.nn.ReLU()(-grad[:, self.mono_increasing_list]))
         if len(self.mono_decreasing_list) > 0:

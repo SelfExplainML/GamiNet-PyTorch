@@ -19,36 +19,105 @@ from .layers import *
 from .dataloader import FastTensorDataLoader
 from .interpret import EBMPreprocessor, InteractionDetector
 
+
 class GAMINet(BaseEstimator, metaclass=ABCMeta):
     """
-        Base class for classification and regression.
+        GAMINet Pytorch Version
+        
+        Parameters
+        ----------
+        meta_info : None or dict
+            A dict of feature_name: feature_type pairs, by default None.
+            If not None, its length should be the same as the number of features.
+            E.g., {"X1": "categorical", "X2": "continuous"}
+        interact_num : int
+            The max number of interactions to be included in the second stage training, by default 20.
+        subnet_size_main_effect : list of int
+            The hidden layer architecture of each subnetwork in the main effect block, by default [40] * 5.
+        subnet_size_interaction : list of int
+            The hidden layer architecture of each subnetwork in the interaction block, by default [40] * 5.
+        activation_func : torch funciton
+            The activation function, by default torch.nn.ReLU().
+        max_epochs : list of int
+            The max number of epochs in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default [1000, 1000, 100].
+        learning_rates : list of float
+            The initial learning rates of Adam optimizer in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default [1e-4, 1e-4, 1e-4].
+        early_stop_thres : list of int or "auto"
+            The early stopping threshold in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default ["auto", "auto", "auto"].
+            In auto mode, the value is set to 80000 / (max_iter_per_epoch * batch_size).
+        batch_size : int
+            The batch size, by default 1000.
+            Note that it should not be larger than the training size * (1 - validation ratio). 
+        batch_size : int
+            The batch size used in the inference stage by default 10000.
+            It is imposed to avoid out-of-memory issue when dealing very large dataset.
+        max_iter_per_epoch : int
+            The max number of iterations per epoch, by default 100.
+            In the init stage of model fit, its value will be clipped by min(max_iter_per_epoch, int(sample_size / batch_size)).
+            For each epoch, the data would be reshuffled and only the first "max_iter_per_epoch" batches would be used for training. 
+            It is imposed to make the training scalable for very large dataset.
+        val_ratio : float
+            The validation ratio, by default 0.2.
+            It is used together with max_val_size, with validation size = min(train_x.shape[0] * val_ratio, max_val_size)
+        max_val_size : int
+            The max size of validation set, by default 10000.
+            It is used together with val_ratio, with validation size = min(train_x.shape[0] * val_ratio, max_val_size)
+        warm_start : bool
+            Initialize the network by fitting a rough B-spline based GAM model with tensor product interactions, by default True.
+            The initialization is performed by, 1) fit B-spline GAM as teacher model, 2) generate random samples from the teacher model, 3) fit each subnetwork using the generated samples. And it is used for both main effect and interaction subnetwork initialization.
+        gam_sample_size : int
+            The sub-sample size for GAM fitting as warm_start=True, by default 5000.
+        mlp_sample_size : int
+            The generated sample size for individual subnetwork fitting as warm_start=True, by default 1000.
+        heredity : bool
+            Whether to perform interaction screening subject to heredity constraint, by default True.
+        loss_threshold : float
+            The loss tolerance threshold for selecting fewer main effects or interactions, according to the validation performance, by default 0.0.
+            For instance, assume the best validation performance is achived when using 10 main effects; if only use the top 5 main effects also gives similar validation performance, we could prune the last 5 by setting this parameter to be positive.
+        reg_clarity : float
+            The regularization strength of marginal clarity constraint, by default 0.1.
+        reg_mono : float
+            The regularization strength of monotonicity constraint, by default 0.1.
+        mono_sample_size : int
+            As monotonicity constraint is used, we would generate some data points uniformly within the feature spacec per epoch, to impose the monotonicity regularization in addition to original training samples, by default 200.
+        mono_increasing_list : None or list
+            The feature index list with monotonic increasing constraint, by default None.
+        mono_decreasing_list : None or list
+            The feature index list with monotonic decreasing constraint, by default None.
+        boundary_clip : bool
+            In the inference stage, whether to clip the feature values by their min and max values in the training data, by default True.
+        verbose : bool
+            Whether to output the training logs, by default False.
+        device : string
+            The hard device name used for training, by default "cpu".
+        random_state : int
+            The random seed, by default 0.
      """
 
     def __init__(self, loss_fn,
                  meta_info=None,
                  interact_num=20,
-                 hidden_layer_sizes_main_effect=[40] * 2,
-                 hidden_layer_sizes_interaction=[40] * 2,
-                 learning_rates=[1e-4, 1e-4, 1e-4],
-                 batch_size=200,
-                 batch_size_inference=1000,
+                 subnet_size_main_effect=[40] * 5,
+                 subnet_size_interaction=[40] * 5,
                  activation_func=torch.nn.ReLU(),
-                 max_epoch_main_effect=1000,
-                 max_epoch_interaction=1000,
-                 max_epoch_tuning=100,
-                 max_iteration_per_epoch=100,
-                 early_stop_thres=[10, 10, 10],
-                 heredity=True,
-                 loss_threshold=0.01,
-                 reg_clarity=0.1,
-                 reg_mono=0.1,
-                 mono_increasing_list=None,
-                 mono_decreasing_list=None,
+                 max_epochs=[1000, 1000, 100],
+                 learning_rates=[1e-4, 1e-4, 1e-4],
+                 early_stop_thres=["auto", "auto", "auto"],
+                 batch_size=1000,
+                 batch_size_inference=1000,
+                 max_iter_per_epoch=100,
                  val_ratio=0.2,
                  max_val_size=10000,
                  warm_start=True,
                  gam_sample_size=5000,
                  mlp_sample_size=1000,
+                 heredity=True,
+                 loss_threshold=0.0,
+                 reg_clarity=0.1,
+                 reg_mono=0.1,
+                 mono_sample_size=200,
+                 mono_increasing_list=None,
+                 mono_decreasing_list=None,
                  boundary_clip=True,
                  verbose=False,
                  device="cpu",
@@ -59,36 +128,33 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.loss_fn = loss_fn
         self.meta_info = meta_info
         self.interact_num = interact_num
-        self.hidden_layer_sizes_main_effect = hidden_layer_sizes_main_effect
-        self.hidden_layer_sizes_interaction = hidden_layer_sizes_interaction
+        self.subnet_size_main_effect = subnet_size_main_effect
+        self.subnet_size_interaction = subnet_size_interaction
+        self.activation_func = activation_func
 
+        self.max_epochs = max_epochs
         self.learning_rates = learning_rates
+        self.early_stop_thres = early_stop_thres
         self.batch_size = batch_size
         self.batch_size_inference = batch_size_inference
-        self.activation_func = activation_func
-        self.max_epoch_tuning = max_epoch_tuning
-        self.max_epoch_main_effect = max_epoch_main_effect
-        self.max_epoch_interaction = max_epoch_interaction
-        self.max_iteration_per_epoch = max_iteration_per_epoch
-        self.early_stop_thres = early_stop_thres
-        self.early_stop_thres1 = early_stop_thres[0]
-        self.early_stop_thres2 = early_stop_thres[1]
-        self.early_stop_thres3 = early_stop_thres[2]
-        self.early_stop = True if sum(self.early_stop_thres) > 0 else False
-
-        self.heredity = heredity
-        self.reg_clarity = reg_clarity
-        self.reg_mono = reg_mono
-        self.loss_threshold = loss_threshold
-        self.mono_increasing_list = mono_increasing_list if mono_increasing_list is not None else []
-        self.mono_decreasing_list = mono_decreasing_list if mono_decreasing_list is not None else []
-        self.monotonicity = True if len(self.mono_increasing_list + self.mono_decreasing_list) > 0 else False
+        self.max_iter_per_epoch = max_iter_per_epoch
+        self.val_ratio = val_ratio
+        self.max_val_size = max_val_size
 
         self.warm_start = warm_start
         self.gam_sample_size = gam_sample_size
         self.mlp_sample_size = mlp_sample_size
-        self.val_ratio = val_ratio
-        self.max_val_size = max_val_size
+
+        self.heredity = heredity
+        self.reg_clarity = reg_clarity
+        self.loss_threshold = loss_threshold
+
+        self.reg_mono = reg_mono
+        self.mono_increasing_list = mono_increasing_list if mono_increasing_list is not None else []
+        self.mono_decreasing_list = mono_decreasing_list if mono_decreasing_list is not None else []
+        self.monotonicity = True if len(self.mono_increasing_list + self.mono_decreasing_list) > 0 else False
+        self.mono_sample_size = mono_sample_size
+
         self.boundary_clip = boundary_clip
         self.verbose = verbose
         self.device = device
@@ -101,11 +167,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
     
     @abstractmethod
     def build_teacher_interaction(self):
-
-        pass
-
-    @abstractmethod
-    def build_student_model(self):
 
         pass
 
@@ -364,7 +425,10 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.max_value = torch.tensor(np.max(x, axis=0), dtype=torch.float, device=self.device)
         self.training_generator = FastTensorDataLoader(self.tr_x, self.tr_y, self.tr_sw,
                                         batch_size=self.batch_size, shuffle=True)
-        self.max_iteration_per_epoch = min(len(self.training_generator), self.max_iteration_per_epoch)
+        self.max_iter_per_epoch = min(len(self.training_generator), self.max_iter_per_epoch)
+        for i, item in enumerate(self.early_stop_thres):
+            if item == "auto":
+                self.early_stop_thres[i] = int(80000 / (self.max_iter_per_epoch * self.batch_size))
         self.estimate_density(x, sample_weight)
 
     def build_net(self, x, y, sample_weight):
@@ -378,8 +442,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.net = pyGAMINet(nfeature_index_list=self.nfeature_index_list,
                       cfeature_index_list=self.cfeature_index_list,
                       num_classes_list=self.num_classes_list,
-                      hidden_layer_sizes_main_effect=self.hidden_layer_sizes_main_effect,
-                      hidden_layer_sizes_interaction=self.hidden_layer_sizes_interaction,
+                      subnet_size_main_effect=self.subnet_size_main_effect,
+                      subnet_size_interaction=self.subnet_size_interaction,
                       activation_func=self.activation_func,
                       heredity=self.heredity,
                       mono_increasing_list=self.mono_increasing_list,
@@ -413,6 +477,36 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.prepare_data(x, y, sample_weight, stratified)
         self.build_net(x, y, sample_weight)
 
+    def fit_individual_subnet(self, x, y, subnet, idx, loss_fn, max_epochs=1000, batch_size=200, early_stop_thres=10):
+
+        last_improvement = 0
+        best_validation = np.inf
+        opt = torch.optim.Adam(list(subnet.parameters()), lr=0.001)
+        training_generator = FastTensorDataLoader(torch.tensor(x, dtype=torch.float, device=self.device),
+                                    torch.tensor(y, dtype=torch.float, device=self.device),
+                                    batch_size=min(200, int(0.2 * x.shape[0])), shuffle=True)
+        for epoch in range(max_epochs):
+            self.net.train()
+            accumulated_size = 0.0
+            accumulated_loss = 0.0
+            for batch_no, batch_data in enumerate(training_generator):
+                opt.zero_grad(set_to_none=True)
+                batch_xx = batch_data[0].to(self.device)
+                batch_yy = batch_data[1].to(self.device).ravel()
+                pred = subnet.individual_forward(batch_xx, idx).ravel()
+                loss = torch.mean(loss_fn(pred, batch_yy))
+                loss.backward()
+                opt.step()
+                accumulated_size += batch_xx.shape[0]
+                accumulated_loss += (loss * batch_xx.shape[0]).cpu().detach().numpy()
+            self.net.eval()
+            accumulated_loss = accumulated_loss / accumulated_size
+            if accumulated_loss < best_validation:
+                    best_validation = accumulated_loss
+                    last_improvement = epoch
+            if epoch - last_improvement > early_stop_thres:
+                break
+
     def warm_start_main_effect(self):
 
         if not self.warm_start:
@@ -421,17 +515,15 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         if self.verbose:
             print("#" * 15 + "Run Warm Initialization for Main Effect" + "#" * 15)
 
-        wlist = []
-        blist = []
         surrogate_estimator, intercept = self.build_teacher_main_effect()
+        self.net.output_bias.data = self.net.output_bias.data + torch.tensor(intercept, dtype=torch.float, device=self.device)
         for idx in range(self.n_features):
             if idx in self.nfeature_index_list:
                 simu_xx = np.zeros((self.mlp_sample_size, self.n_features))
                 simu_xx[:, idx] = np.random.uniform(self.min_value[idx], self.max_value[idx], self.mlp_sample_size)
                 simu_yy = surrogate_estimator[idx](simu_xx)
-                weights, biases = self.build_student_model(simu_xx[:, [idx]], simu_yy, self.hidden_layer_sizes_main_effect)
-                wlist.append(weights)
-                blist.append(biases)
+                self.fit_individual_subnet(simu_xx[:, [idx]], simu_yy, self.net.main_effect_blocks.nsubnets,
+                                  self.nfeature_index_list.index(idx), loss_fn=torch.nn.MSELoss(reduction="none"))
             if idx in self.cfeature_index_list:
                 i = self.cfeature_index_list.index(idx)
                 simu_xx = np.zeros((self.num_classes_list[i], self.n_features))
@@ -439,13 +531,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 simu_yy = surrogate_estimator[idx](simu_xx)
                 self.net.main_effect_blocks.csubnets.class_bias[i].data = torch.tensor(simu_yy.reshape(-1, 1),
                                                             dtype=torch.float, device=self.device)
-
-        for i, (weights, biases) in enumerate(zip(self.net.main_effect_blocks.nsubnets.all_weights,
-                                    self.net.main_effect_blocks.nsubnets.all_biases)):
-            weights.data = torch.tensor(np.stack([w[i] for w in wlist]), dtype=torch.float, device=self.device)
-            biases.data = torch.tensor(np.stack([w[i] for w in blist]), dtype=torch.float, device=self.device)
-
-        self.net.output_bias.data = self.net.output_bias.data + torch.tensor(intercept, dtype=torch.float, device=self.device)
 
     def warm_start_interaction(self):
 
@@ -455,9 +540,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         if self.verbose:
             print("#" * 15 + "Run Warm Initialization for Interaction" + "#" * 15)
 
-        wlist = []
-        blist = []
         surrogate_estimator, intercept = self.build_teacher_interaction()
+        self.net.output_bias.data = self.net.output_bias.data + torch.tensor(intercept, dtype=torch.float, device=self.device)
         for i, (idx1, idx2) in enumerate(self.interaction_list):
             simu_xx = np.zeros((self.mlp_sample_size, self.n_features))
             if idx1 in self.cfeature_index_list:
@@ -474,20 +558,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 x2 = simu_xx[:, [idx2]]
 
             simu_yy = surrogate_estimator[i](simu_xx)
-            weights, biases = self.build_student_model(np.hstack([x1, x2]), simu_yy, self.hidden_layer_sizes_interaction)
-            wlist.append(weights)
-            blist.append(biases)
-
-        for i, (weights, biases) in enumerate(zip(self.net.interaction_blocks.subnets.all_weights,
-                                    self.net.interaction_blocks.subnets.all_biases)):
-            if i == 0:
-                filled_weight = [np.vstack([w[i], np.zeros((weights.shape[1] - w[i].shape[0], w[i].shape[1]))]) for w in wlist]
-                weights.data = torch.tensor(np.stack(filled_weight), dtype=torch.float, device=self.device)
-            else:
-                weights.data = torch.tensor(np.stack([w[i] for w in wlist]), dtype=torch.float, device=self.device)
-            biases.data = torch.tensor(np.stack([w[i] for w in blist]), dtype=torch.float, device=self.device)
-
-        self.net.output_bias.data = self.net.output_bias.data + torch.tensor(intercept, dtype=torch.float, device=self.device)
+            self.fit_individual_subnet(np.hstack([x1, x2]), simu_yy, self.net.interaction_blocks.subnets,
+                              i, loss_fn=torch.nn.MSELoss(reduction="none"))
 
     def _get_interaction_list(self, x, y, w, scores, feature_names,
                               feature_types, n_jobs, model_type, num_classes):
@@ -529,23 +601,22 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         if self.verbose:
             print("#" * 20 + "Stage 1: Main Effect Training" + "#" * 20)
 
-        self.warm_start_main_effect()
         last_improvement = 0
         best_validation = np.inf
+        self.warm_start_main_effect()
         train_size = self.tr_x.shape[0]
         opt = torch.optim.Adam(list(self.net.main_effect_blocks.parameters()) +
-                           [self.net.main_effect_weights, self.net.output_bias], lr=self.learning_rates[0])
-
-        for epoch in range(self.max_epoch_main_effect):
+                        [self.net.main_effect_weights, self.net.output_bias], lr=self.learning_rates[0])
+        for epoch in range(self.max_epochs[0]):
             self.net.train()
             accumulated_size = 0
             accumulated_loss = 0.0
             if self.verbose:
-                pbar = tqdm(self.training_generator, total=self.max_iteration_per_epoch, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+                pbar = tqdm(self.training_generator, total=self.max_iter_per_epoch, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             else:
                 pbar = self.training_generator
             for batch_no, batch_data in enumerate(pbar):
-                if batch_no >= self.max_iteration_per_epoch:
+                if batch_no >= self.max_iter_per_epoch:
                     break
                 opt.zero_grad(set_to_none=True)
                 batch_xx = batch_data[0].to(self.device)
@@ -555,29 +626,51 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                            main_effect=True, interaction=False,
                            clarity=False,
                            monotonicity=self.monotonicity and self.reg_mono > 0).ravel()
-                mono_loss_reg = self.reg_mono * self.net.mono_loss
-                mono_loss_reg.backward(retain_graph=True)
+
+                if self.monotonicity and self.reg_mono > 0:
+                    mono_loss_reg = self.reg_mono * self.net.mono_loss
+                    simu_inputs = np.random.uniform(self.min_value, self.max_value, size=(self.mono_sample_size, len(self.max_value)))
+                    simu_inputs = torch.tensor(simu_inputs, dtype=torch.float, device=self.device)
+                    simu_pred = self.net(simu_inputs,
+                               main_effect=True, interaction=False,
+                               clarity=False,
+                               monotonicity=self.monotonicity and self.reg_mono > 0).ravel()
+                    mono_loss_reg = mono_loss_reg + self.reg_mono * self.net.mono_loss
+                    mono_loss_reg.backward(retain_graph=True)
+
                 loss = torch.mean(self.loss_fn(pred, batch_yy) * batch_sw)
                 loss.backward()
                 opt.step()
                 accumulated_size += batch_xx.shape[0]
                 accumulated_loss += (loss * batch_xx.shape[0]).cpu().detach().numpy()
                 if self.verbose:
-                    pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epoch_main_effect))) + 1)
+                    pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[0]))) + 1)
                                   + "d, train loss: %0.5f") % (epoch + 1, accumulated_loss / accumulated_size))
+                if batch_no == (len(self.training_generator) - 1) or batch_no == (self.max_iter_per_epoch - 1):
+                    self.net.eval()
+                    self.err_train_main_effect_training.append(accumulated_loss / accumulated_size)
+                    self.err_val_main_effect_training.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
+                                                         main_effect=True, interaction=False))
+                    if self.verbose:
+                        pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[0]))) + 1)
+                              + "d, train loss: %0.5f, validation loss: %0.5f") % 
+                              (epoch + 1, self.err_train_main_effect_training[-1], self.err_val_main_effect_training[-1]))
 
-            self.net.eval()
-            self.err_train_main_effect_training.append(accumulated_loss / accumulated_size)
-            self.err_val_main_effect_training.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
-                                                 main_effect=True, interaction=False))
             if self.err_val_main_effect_training[-1] < best_validation:
                 best_validation = self.err_val_main_effect_training[-1]
                 last_improvement = epoch
-            if epoch - last_improvement > self.early_stop_thres1:
-                if self.verbose:
-                    print("Main Effect Training Stop at Epoch: %d, train loss: %0.5f, val loss: %0.5f" %
-                                (epoch + 1, self.err_train_main_effect_training[-1], self.err_val_main_effect_training[-1]))  
-                break
+            if epoch - last_improvement > self.early_stop_thres[0]:
+                if self.monotonicity and self.reg_mono > 0:
+                    if self.certify_mono(n_samples=self.mono_sample_size):
+                        break
+                    else:
+                        self.reg_mono = min(self.reg_mono * 2, 1e5)
+                else:
+                    break
+
+        if self.verbose:
+            print("Main Effect Training Stop at Epoch: %d, train loss: %0.5f, validation loss: %0.5f" %
+                        (epoch + 1, self.err_train_main_effect_training[-1], self.err_val_main_effect_training[-1]))  
 
         main_effect_output = self.get_main_effect_raw_output(self.tr_x).cpu().numpy()
         self.main_effect_mean = np.average(main_effect_output, axis=0, weights=self.tr_sw.cpu().numpy())
@@ -644,23 +737,23 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         if self.verbose:
             print("#" * 20 + "Stage 2: Interaction Training" + "#" * 20)
 
-        self.warm_start_interaction()
         last_improvement = 0
         best_validation = np.inf
         train_size = self.tr_x.shape[0]
+        self.warm_start_interaction()
         opt = torch.optim.Adam(list(self.net.interaction_blocks.parameters()) +
                         [self.net.interaction_weights, self.net.output_bias], lr=self.learning_rates[1])
         
-        for epoch in range(self.max_epoch_interaction):
+        for epoch in range(self.max_epochs[1]):
             self.net.train()
             accumulated_size = 0
             accumulated_loss = 0.0
             if self.verbose:
-                pbar = tqdm(self.training_generator, total=self.max_iteration_per_epoch, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+                pbar = tqdm(self.training_generator, total=self.max_iter_per_epoch, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             else:
                 pbar = self.training_generator
             for batch_no, batch_data in enumerate(pbar):
-                if batch_no >= self.max_iteration_per_epoch:
+                if batch_no >= self.max_iter_per_epoch:
                     break
                 opt.zero_grad(set_to_none=True)
                 batch_xx = batch_data[0].to(self.device)
@@ -672,30 +765,51 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                            monotonicity=self.monotonicity and self.reg_mono > 0).ravel()
                 clarity_loss_reg = self.reg_clarity * self.net.clarity_loss
                 clarity_loss_reg.backward(retain_graph=True)
-                mono_loss_reg = self.reg_mono * self.net.mono_loss
-                mono_loss_reg.backward(retain_graph=True)
+
+                if self.monotonicity and self.reg_mono > 0:
+                    mono_loss_reg = self.reg_mono * self.net.mono_loss
+                    simu_inputs = np.random.uniform(self.min_value, self.max_value, size=(self.mono_sample_size, len(self.max_value)))
+                    simu_inputs = torch.tensor(simu_inputs, dtype=torch.float, device=self.device)
+                    simu_pred = self.net(simu_inputs,
+                               main_effect=True, interaction=True,
+                               clarity=self.reg_clarity > 0,
+                               monotonicity=self.monotonicity and self.reg_mono > 0).ravel()
+                    mono_loss_reg = mono_loss_reg + self.reg_mono * self.net.mono_loss
+                    mono_loss_reg.backward(retain_graph=True)
+
                 loss = torch.mean(self.loss_fn(pred, batch_yy) * batch_sw) 
                 loss.backward()
                 opt.step()
                 accumulated_size += batch_xx.shape[0]
                 accumulated_loss += (loss * batch_xx.shape[0]).cpu().detach().numpy()
                 if self.verbose:
-                    pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epoch_interaction))) + 1)
+                    pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[1]))) + 1)
                                   + "d, train loss: %0.5f") % (epoch + 1, accumulated_loss / accumulated_size)) 
+                if batch_no == (len(self.training_generator) - 1) or batch_no == (self.max_iter_per_epoch - 1):
+                    self.net.eval()
+                    self.err_train_interaction_training.append(accumulated_loss / accumulated_size)
+                    self.err_val_interaction_training.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
+                                                         main_effect=True, interaction=True))
+                    if self.verbose:
+                        pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[1]))) + 1)
+                              + "d, train loss: %0.5f, validation loss: %0.5f") % 
+                              (epoch + 1, self.err_train_interaction_training[-1], self.err_val_interaction_training[-1]))
 
-            self.net.eval()
-            self.err_train_interaction_training.append(accumulated_loss / accumulated_size)
-            self.err_val_interaction_training.append(self.evaluate(self.val_x,
-                                             self.val_y,
-                                             self.val_sw, main_effect=True, interaction=True))
             if self.err_val_interaction_training[-1] < best_validation:
                 best_validation = self.err_val_interaction_training[-1]
                 last_improvement = epoch
-            if epoch - last_improvement > self.early_stop_thres2:
-                if self.verbose:
-                    print("Interaction Training Stop at Epoch: %d, train loss: %0.5f, val loss: %0.5f" %
-                      (epoch + 1, self.err_train_interaction_training[-1], self.err_val_interaction_training[-1]))  
-                break
+            if epoch - last_improvement > self.early_stop_thres[1]:
+                if self.monotonicity and self.reg_mono > 0:
+                    if self.certify_mono(n_samples=self.mono_sample_size):
+                        break
+                    else:
+                        self.reg_mono = min(self.reg_mono * 2, 1e5)
+                else:
+                    break
+
+        if self.verbose:
+            print("Interaction Training Stop at Epoch: %d, train loss: %0.5f, validation loss: %0.5f" %
+              (epoch + 1, self.err_train_interaction_training[-1], self.err_val_interaction_training[-1]))  
 
         interaction_output = self.get_interaction_raw_output(self.tr_x).cpu().numpy()
         self.interaction_mean = np.average(interaction_output, axis=0, weights=self.tr_sw.cpu().numpy())
@@ -751,16 +865,16 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         if self.n_interactions > 0:
             opt_interaction = torch.optim.Adam(list(self.net.interaction_blocks.parameters()) +
                                    [self.net.interaction_weights], lr=self.learning_rates[2])
-        for epoch in range(self.max_epoch_tuning):
+        for epoch in range(self.max_epochs[2]):
             self.net.train()
             accumulated_size = 0
             accumulated_loss = 0.0
             if self.verbose:
-                pbar = tqdm(self.training_generator, total=self.max_iteration_per_epoch, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+                pbar = tqdm(self.training_generator, total=self.max_iter_per_epoch, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
             else:
                 pbar = self.training_generator
             for batch_no, batch_data in enumerate(pbar):
-                if batch_no >= self.max_iteration_per_epoch:
+                if batch_no >= self.max_iter_per_epoch:
                     break
 
                 opt_main_effect.zero_grad(set_to_none=True)
@@ -779,8 +893,17 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 clarity_loss_reg.backward(retain_graph=True)
                 opt_main_effect.zero_grad(set_to_none=True)
 
-                mono_loss_reg = self.reg_mono * self.net.mono_loss
-                mono_loss_reg.backward(retain_graph=True)
+                if self.monotonicity and self.reg_mono > 0:
+                    mono_loss_reg = self.reg_mono * self.net.mono_loss
+                    simu_inputs = np.random.uniform(self.min_value, self.max_value, size=(self.mono_sample_size, len(self.max_value)))
+                    simu_inputs = torch.tensor(simu_inputs, dtype=torch.float, device=self.device)
+                    simu_pred = self.net(simu_inputs,
+                               main_effect=True, interaction=True,
+                               clarity=self.reg_clarity > 0,
+                               monotonicity=self.monotonicity and self.reg_mono > 0).ravel()
+                    mono_loss_reg = mono_loss_reg + self.reg_mono * self.net.mono_loss
+                    mono_loss_reg.backward(retain_graph=True)
+
                 loss = torch.mean(self.loss_fn(pred, batch_yy) * batch_sw) 
                 loss.backward()
                 opt_main_effect.step()
@@ -789,22 +912,33 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 accumulated_size += batch_xx.shape[0]
                 accumulated_loss += (loss * batch_xx.shape[0]).cpu().detach().numpy()
                 if self.verbose:
-                    pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epoch_tuning))) + 1)
+                    pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[2]))) + 1)
                                   + "d, train loss: %0.5f") % (epoch + 1, accumulated_loss / accumulated_size))  
+                if batch_no == (len(self.training_generator) - 1) or batch_no == (self.max_iter_per_epoch - 1):
+                    self.net.eval()
+                    self.err_train_tuning.append(accumulated_loss / accumulated_size)
+                    self.err_val_tuning.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
+                                                         main_effect=True, interaction=True))
+                    if self.verbose:
+                        pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[2]))) + 1)
+                              + "d, train loss: %0.5f, validation loss: %0.5f") % 
+                              (epoch + 1, self.err_train_tuning[-1], self.err_val_tuning[-1]))
 
-            self.net.eval()
-            self.err_train_tuning.append(accumulated_loss / accumulated_size)
-            self.err_val_tuning.append(self.evaluate(self.val_x,
-                                       self.val_y,
-                                       self.val_sw, main_effect=True, interaction=True))
             if self.err_val_tuning[-1] < best_validation:
                 best_validation = self.err_val_tuning[-1]
                 last_improvement = epoch
-            if epoch - last_improvement > self.early_stop_thres3:
-                if self.verbose:
-                    print("Fine Tuning Stop at Epoch: %d, train loss: %0.5f, val loss: %0.5f" %
-                              (epoch + 1, self.err_train_tuning[-1], self.err_val_tuning[-1]))
-                break
+            if epoch - last_improvement > self.early_stop_thres[2]:
+                if self.monotonicity and self.reg_mono > 0:
+                    if self.certify_mono(n_samples=self.mono_sample_size):
+                        break
+                    else:
+                        self.reg_mono = min(self.reg_mono * 2, 1e5)
+                else:
+                    break
+
+        if self.verbose:
+            print("Fine Tuning Stop at Epoch: %d, train loss: %0.5f, validation loss: %0.5f" %
+                      (epoch + 1, self.err_train_tuning[-1], self.err_val_tuning[-1]))
 
         main_effect_output = self.get_main_effect_raw_output(self.tr_x).cpu().numpy()
         self.main_effect_mean = np.average(main_effect_output, axis=0, weights=self.tr_sw.cpu().numpy())
@@ -873,9 +1007,9 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         absmax = 1.05 * np.max(np.abs(grad[:, feature_idx]))
         plt.ylim(-absmax, absmax)
         if feature_idx in self.mono_increasing_list:
-            plt.title("Violating Size: " + str(np.where(grad[:, feature_idx] < 0)[0].shape[0] / n_samples * 100) + "%")
+            plt.title("Violating Size: %0.2f%%" % (np.where(grad[:, feature_idx] < 0)[0].shape[0] / n_samples * 100))
         if feature_idx in self.mono_decreasing_list:
-            plt.title("Violating Size: " + str(np.where(grad[:, feature_idx] > 0)[0].shape[0] / n_samples * 100) + "%")
+            plt.title("Violating Size: %0.2f%%" % (np.where(grad[:, feature_idx] > 0)[0].shape[0] / n_samples * 100))
         plt.show()
 
     def global_explain(self, main_grid_size=100, interact_grid_size=100, save_dict=False, folder="./", name="global_explain"):
@@ -1044,19 +1178,17 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         model_dict = {}
         model_dict["meta_info"] = self.meta_info
-        model_dict["hidden_layer_sizes_main_effect"] = self.hidden_layer_sizes_main_effect
-        model_dict["hidden_layer_sizes_interaction"] = self.hidden_layer_sizes_interaction
+        model_dict["subnet_size_main_effect"] = self.subnet_size_main_effect
+        model_dict["subnet_size_interaction"] = self.subnet_size_interaction
 
         model_dict["learning_rates"] = self.learning_rates
         model_dict["batch_size"] = self.batch_size
         model_dict["batch_size_inference"] = self.batch_size_inference
         
         model_dict["activation_func"] = self.activation_func
-        model_dict["max_epoch_tuning"] = self.max_epoch_tuning
-        model_dict["max_epoch_main_effect"] = self.max_epoch_main_effect
-        model_dict["max_epoch_interaction"] = self.max_epoch_interaction
+        model_dict["max_epochs"] = self.max_epochs
         model_dict["early_stop_thres"] = self.early_stop_thres
-        model_dict["max_iteration_per_epoch"] = self.max_iteration_per_epoch
+        model_dict["max_iter_per_epoch"] = self.max_iter_per_epoch
 
         model_dict["heredity"] = self.heredity
         model_dict["reg_clarity"] = self.reg_clarity

@@ -11,7 +11,7 @@ package_data = {
 
 setup(name='gaminet',
       version='1.0.0',
-      description='Pytorch version of GAMINet',
+      description='Pytorch version of GAMINet; it was done when I was PhD student in HKU',
       url='https://github.com/ZebinYang/GAMINet-Pytorch',
       author='Zebin Yang',
       author_email='yangzb2010@connect.hku.hk',

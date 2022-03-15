@@ -7,48 +7,45 @@ from sklearn.base import RegressorMixin, ClassifierMixin, BaseEstimator
 
 from pygam.terms import TermList
 from pygam import LinearGAM, LogisticGAM, f, s, te
-from sklearn.neural_network import MLPRegressor, MLPClassifier
 
 from .base import GAMINet
 
 
 class GAMINetRegressor(GAMINet, RegressorMixin):
 
-    def __init__(self, meta_info=None, interact_num=20, hidden_layer_sizes_main_effect=[40] * 2, hidden_layer_sizes_interaction=[40] * 2,
-                 learning_rates=[1e-4, 1e-4, 1e-4], batch_size=200, batch_size_inference=10000, activation_func=torch.nn.ReLU(),
-                 max_epoch_main_effect=1000, max_epoch_interaction=1000, max_epoch_tuning=100, max_iteration_per_epoch=100,
-                 early_stop_thres=[10, 10, 10], heredity=True, reg_clarity=0.1, loss_threshold=0.01,
-                 reg_mono=0.1, mono_increasing_list=None, mono_decreasing_list=None,
-                 warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, val_ratio=0.2, max_val_size=10000,
+    def __init__(self, meta_info=None, interact_num=20,
+                 subnet_size_main_effect=[40] * 5, subnet_size_interaction=[40] * 5, activation_func=torch.nn.ReLU(),
+                 max_epochs=[1000, 1000, 100], learning_rates=[1e-3, 1e-3, 1e-3], early_stop_thres=["auto", "auto", "auto"],
+                 batch_size=200, batch_size_inference=10000, max_iter_per_epoch=100, val_ratio=0.2, max_val_size=10000, 
+                 warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, 
+                 heredity=True, reg_clarity=0.1, loss_threshold=0.0, 
+                 reg_mono=0.1, mono_increasing_list=None, mono_decreasing_list=None, mono_sample_size=200,
                  boundary_clip=True, verbose=False, device="cpu", random_state=0):
-        """Classifier object inherits Trainer object.
-           This function is the constructor for both Trainer and Classifier objects.
-        """
-        super(GAMINetRegressor, self).__init__(meta_info=meta_info,
-                                   loss_fn=torch.nn.MSELoss(reduction="none"),
+
+        super(GAMINetRegressor, self).__init__(loss_fn=torch.nn.MSELoss(reduction="none"),
+                                   meta_info=meta_info,
                                    interact_num=interact_num,
-                                   hidden_layer_sizes_main_effect=hidden_layer_sizes_main_effect,
-                                   hidden_layer_sizes_interaction=hidden_layer_sizes_interaction,
+                                   subnet_size_main_effect=subnet_size_main_effect,
+                                   subnet_size_interaction=subnet_size_interaction,
+                                   activation_func=activation_func,
+                                   max_epochs=max_epochs,
                                    learning_rates=learning_rates,
+                                   early_stop_thres=early_stop_thres,
                                    batch_size=batch_size,
                                    batch_size_inference=batch_size_inference,
-                                   activation_func=activation_func,
-                                   max_epoch_main_effect=max_epoch_main_effect,
-                                   max_epoch_interaction=max_epoch_interaction,
-                                   max_epoch_tuning=max_epoch_tuning,
-                                   max_iteration_per_epoch=max_iteration_per_epoch,
-                                   early_stop_thres=early_stop_thres,
-                                   heredity=heredity,
-                                   reg_clarity=reg_clarity,
-                                   reg_mono=reg_mono,
-                                   loss_threshold=loss_threshold,
-                                   mono_increasing_list=mono_increasing_list,
-                                   mono_decreasing_list=mono_decreasing_list,
+                                   max_iter_per_epoch=max_iter_per_epoch,
+                                   val_ratio=val_ratio,
+                                   max_val_size=max_val_size,
                                    warm_start=warm_start,
                                    gam_sample_size=gam_sample_size,
                                    mlp_sample_size=mlp_sample_size,
-                                   val_ratio=val_ratio,
-                                   max_val_size=max_val_size,
+                                   heredity=heredity,
+                                   reg_clarity=reg_clarity,
+                                   loss_threshold=loss_threshold,
+                                   reg_mono=reg_mono,
+                                   mono_sample_size=mono_sample_size,
+                                   mono_increasing_list=mono_increasing_list,
+                                   mono_decreasing_list=mono_decreasing_list,
                                    boundary_clip=boundary_clip,
                                    verbose=verbose,
                                    device=device,
@@ -113,17 +110,6 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
         surrogate_estimator = [margial_effect(i) for i in range(self.n_interactions)]
         return surrogate_estimator, intercept
 
-    def build_student_model(self, x, y, hidden_layer_size):
-
-        mlp = MLPRegressor(hidden_layer_sizes=hidden_layer_size,
-                     max_iter=1000, early_stopping=True, n_iter_no_change=10, validation_fraction=0.2,
-                     batch_size=min(200, int(0.2 * x.shape[0])), solver='adam', activation="relu",
-                     learning_rate_init=0.01, random_state=self.random_state)
-        mlp.fit(x, y)
-        weights = mlp.coefs_
-        biases = mlp.intercepts_
-        return weights, biases
-
     def get_interaction_list(self, x, y, w, scores, feature_names, feature_types, n_jobs):
 
         num_classes = -1
@@ -158,41 +144,39 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
 
 class GAMINetClassifier(GAMINet, ClassifierMixin):
 
-    def __init__(self, meta_info=None, interact_num=20, hidden_layer_sizes_main_effect=[40] * 2, hidden_layer_sizes_interaction=[40] * 2,
-                 learning_rates=[1e-4, 1e-4, 1e-4], batch_size=200, batch_size_inference=10000, activation_func=torch.nn.ReLU(),
-                 max_epoch_main_effect=1000, max_epoch_interaction=1000, max_epoch_tuning=100, max_iteration_per_epoch=100,
-                 early_stop_thres=[10, 10, 10], heredity=True, reg_clarity=0.1, loss_threshold=0.01,
-                 reg_mono=0.1, mono_increasing_list=None, mono_decreasing_list=None,
-                 warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, val_ratio=0.2, max_val_size=10000,
+    def __init__(self, meta_info=None, interact_num=20,
+                 subnet_size_main_effect=[40] * 5, subnet_size_interaction=[40] * 5, activation_func=torch.nn.ReLU(),
+                 max_epochs=[1000, 1000, 100], learning_rates=[1e-3, 1e-3, 1e-3], early_stop_thres=["auto", "auto", "auto"],
+                 batch_size=200, batch_size_inference=10000, max_iter_per_epoch=100, val_ratio=0.2, max_val_size=10000, 
+                 warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, 
+                 heredity=True, reg_clarity=0.1, loss_threshold=0.0, 
+                 reg_mono=0.1, mono_increasing_list=None, mono_decreasing_list=None, mono_sample_size=200,
                  boundary_clip=True, verbose=False, device="cpu", random_state=0):
-        """Classifier object inherits Trainer object.
-           This function is the constructor for both Trainer and Classifier objects.
-        """
-        super(GAMINetClassifier, self).__init__(meta_info=meta_info,
-                                   loss_fn=torch.nn.BCEWithLogitsLoss(reduction="none"),
+
+        super(GAMINetClassifier, self).__init__(loss_fn=torch.nn.BCEWithLogitsLoss(reduction="none"),
+                                   meta_info=meta_info,
                                    interact_num=interact_num,
-                                   hidden_layer_sizes_main_effect=hidden_layer_sizes_main_effect,
-                                   hidden_layer_sizes_interaction=hidden_layer_sizes_interaction,
+                                   subnet_size_main_effect=subnet_size_main_effect,
+                                   subnet_size_interaction=subnet_size_interaction,
+                                   activation_func=activation_func,
+                                   max_epochs=max_epochs,
                                    learning_rates=learning_rates,
+                                   early_stop_thres=early_stop_thres,
                                    batch_size=batch_size,
                                    batch_size_inference=batch_size_inference,
-                                   activation_func=activation_func,
-                                   max_epoch_main_effect=max_epoch_main_effect,
-                                   max_epoch_interaction=max_epoch_interaction,
-                                   max_epoch_tuning=max_epoch_tuning,
-                                   max_iteration_per_epoch=max_iteration_per_epoch,
-                                   early_stop_thres=early_stop_thres,
-                                   heredity=heredity,
-                                   reg_clarity=reg_clarity,
-                                   reg_mono=reg_mono,
-                                   loss_threshold=loss_threshold,
-                                   mono_increasing_list=mono_increasing_list,
-                                   mono_decreasing_list=mono_decreasing_list,
+                                   max_iter_per_epoch=max_iter_per_epoch,
+                                   val_ratio=val_ratio,
+                                   max_val_size=max_val_size,
                                    warm_start=warm_start,
                                    gam_sample_size=gam_sample_size,
                                    mlp_sample_size=mlp_sample_size,
-                                   val_ratio=val_ratio,
-                                   max_val_size=max_val_size,
+                                   heredity=heredity,
+                                   reg_clarity=reg_clarity,
+                                   loss_threshold=loss_threshold,
+                                   reg_mono=reg_mono,
+                                   mono_sample_size=mono_sample_size,
+                                   mono_increasing_list=mono_increasing_list,
+                                   mono_decreasing_list=mono_decreasing_list,
                                    boundary_clip=boundary_clip,
                                    verbose=verbose,
                                    device=device,
@@ -217,16 +201,16 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
         termlist = TermList()
         for idx, (key, item) in enumerate(self.meta_info.items()):
             if item["type"] == "continuous":
-                termlist += s(idx, spline_order=1, lam=0.6)
+                termlist += s(idx, n_splines=10, spline_order=1, lam=0.6)
             elif item["type"] == "categorical":
                 termlist += f(idx)
             else:
                 continue
 
-        gam = LogisticGAM(termlist)
+        gam = LinearGAM(termlist)
         allx = torch.vstack([self.tr_x, self.val_x])
-        ally = torch.vstack([self.tr_y, self.val_y])
-        
+        ally = torch.vstack([self.tr_y, self.val_y]) * 4 - 2
+
         suffleidx = np.arange(allx.shape[0])
         np.random.shuffle(suffleidx)
         subx = allx[suffleidx][:self.gam_sample_size]
@@ -263,17 +247,6 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
         intercept = gam.coef_[-1]
         surrogate_estimator = [margial_effect(i) for i in range(self.n_interactions)]
         return surrogate_estimator, intercept
-
-    def build_student_model(self, x, y, hidden_layer_size):
-
-        mlp = MLPRegressor(hidden_layer_sizes=hidden_layer_size,
-                     max_iter=1000, early_stopping=True, n_iter_no_change=10, validation_fraction=0.2,
-                     batch_size=min(200, int(0.2 * x.shape[0])), solver='adam', activation="relu",
-                     learning_rate_init=0.01, random_state=self.random_state)
-        mlp.fit(x, y)
-        weights = mlp.coefs_
-        biases = mlp.intercepts_
-        return weights, biases
 
     def get_interaction_list(self, x, y, w, scores, feature_names, feature_types, n_jobs):
 
