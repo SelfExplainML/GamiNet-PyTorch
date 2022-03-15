@@ -1,5 +1,5 @@
-#  GAMI-Net
-Generalized additive models with structured interactions
+#  GAMI-Net Pytorch version
+Generalized additive models with structured interactions; it was done when I was PhD student in HKU.
 
 ## Installation 
 
