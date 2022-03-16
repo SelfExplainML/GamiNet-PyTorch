@@ -42,7 +42,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             The initial learning rates of Adam optimizer in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default [1e-4, 1e-4, 1e-4].
         early_stop_thres : list of int or "auto"
             The early stopping threshold in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default ["auto", "auto", "auto"].
-            In auto mode, the value is set to 80000 / (max_iter_per_epoch * batch_size).
+            In auto mode, the value is set to min(80000 / (max_iter_per_epoch * batch_size), 100).
         batch_size : int
             The batch size, by default 1000.
             Note that it should not be larger than the training size * (1 - validation ratio). 
@@ -425,7 +425,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.max_iter_per_epoch = min(len(self.training_generator), self.max_iter_per_epoch)
         for i, item in enumerate(self.early_stop_thres):
             if item == "auto":
-                self.early_stop_thres[i] = int(80000 / (self.max_iter_per_epoch * self.batch_size))
+                self.early_stop_thres[i] = min(int(80000 / (self.max_iter_per_epoch * self.batch_size)), 100)
         self.estimate_density(x, sample_weight)
 
     def build_net(self, x, y, sample_weight):
