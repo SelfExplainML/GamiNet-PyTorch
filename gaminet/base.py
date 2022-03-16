@@ -1,11 +1,9 @@
 import os
-import copy
 import torch
 import pickle
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from contextlib import closing
 from itertools import combinations
 from matplotlib import pylab as plt
 from joblib import Parallel, delayed
@@ -385,7 +383,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.nfeature_index_list = []
         self.num_classes_list = []
         
-        xx = copy.copy(x)
         self.feature_names = []
         self.feature_types = []
         for idx, (feature_name, feature_info) in enumerate(self.meta_info.items()):
@@ -407,10 +404,10 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         val_size = min(self.max_val_size, int(self.n_samples * self.val_ratio))
         if stratified:
-            tr_x, val_x, tr_y, val_y, tr_sw, val_sw, tr_idx, val_idx = train_test_split(xx, y, sample_weight,
+            tr_x, val_x, tr_y, val_y, tr_sw, val_sw, tr_idx, val_idx = train_test_split(x, y, sample_weight,
                         indices, test_size=val_size, stratify=y, random_state=self.random_state)
         else:
-            tr_x, val_x, tr_y, val_y, tr_sw, val_sw, tr_idx, val_idx = train_test_split(xx, y, sample_weight,
+            tr_x, val_x, tr_y, val_y, tr_sw, val_sw, tr_idx, val_idx = train_test_split(x, y, sample_weight,
                         indices, test_size=val_size, random_state=self.random_state)
 
         self.tr_idx = tr_idx
@@ -545,20 +542,26 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         for i, (idx1, idx2) in enumerate(self.interaction_list):
             simu_xx = np.zeros((self.mlp_sample_size, self.n_features))
             if idx1 in self.cfeature_index_list:
+                num_classes = self.num_classes_list[self.cfeature_index_list.index(idx1)]
                 simu_xx[:, idx1] = np.random.randint(self.min_value[idx1], self.max_value[idx1] + 1, self.mlp_sample_size)
-                x1 = pd.get_dummies(simu_xx[:, idx1]).values
+                x1 = torch.nn.functional.one_hot(torch.tensor(simu_xx[:, idx1]).to(torch.int64),
+                                      num_classes=num_classes).to(torch.float).detach().cpu().numpy()
             else:
                 simu_xx[:, idx1] = np.random.uniform(self.min_value[idx1], self.max_value[idx1], self.mlp_sample_size)
                 x1 = simu_xx[:, [idx1]]
             if idx2 in self.cfeature_index_list:
+                num_classes = self.num_classes_list[self.cfeature_index_list.index(idx2)]
                 simu_xx[:, idx2] = np.random.randint(self.min_value[idx2], self.max_value[idx2] + 1, self.mlp_sample_size)
-                x2 = pd.get_dummies(simu_xx[:, idx2]).values
+                x2 = torch.nn.functional.one_hot(torch.tensor(simu_xx[:, idx2]).to(torch.int64), 
+                                      num_classes=num_classes).to(torch.float).detach().cpu().numpy()
             else:
                 simu_xx[:, idx2] = np.random.uniform(self.min_value[idx2], self.max_value[idx2], self.mlp_sample_size)
                 x2 = simu_xx[:, [idx2]]
 
-            simu_yy = surrogate_estimator[i](simu_xx)
-            self.fit_individual_subnet(np.hstack([x1, x2]), simu_yy, self.net.interaction_blocks.subnets,
+            xx = np.hstack([x1, x2])
+            xx = np.hstack([xx, np.zeros((xx.shape[0], self.net.interaction_blocks.max_n_inputs - xx.shape[1]))])
+            yy = surrogate_estimator[i](simu_xx)
+            self.fit_individual_subnet(xx, yy, self.net.interaction_blocks.subnets,
                               i, loss_fn=torch.nn.MSELoss(reduction="none"))
 
     def _get_interaction_list(self, x, y, w, scores, feature_names,
