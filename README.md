@@ -3,15 +3,6 @@ Generalized additive models with structured interactions; it was done when I was
 
 ## Installation 
 
-The following environments are required:
-
-- Python 3.7 + (anaconda is preferable)
-- torch
-- numpy>=1.15.2
-- pandas>=0.19.2
-- matplotlib>=3.1.3
-- scikit-learn>=0.23.0
-
 ```shell
 pip install git+https://github.com/ZebinYang/GAMINet-PyTorch.git
 ```
