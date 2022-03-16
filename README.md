@@ -8,7 +8,6 @@ pip install git+https://github.com/ZebinYang/GAMINet-PyTorch.git
 ```
 
 ## Citations
-----------
 
 ```latex
 @article{yang2021gami,
