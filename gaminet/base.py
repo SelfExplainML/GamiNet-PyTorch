@@ -28,17 +28,17 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             If not None, its length should be the same as the number of features.
             E.g., {"X1": "categorical", "X2": "continuous"}
         interact_num : int
-            The max number of interactions to be included in the second stage training, by default 20.
+            The max number of interactions to be included in the second stage training, by default 10.
         subnet_size_main_effect : list of int
-            The hidden layer architecture of each subnetwork in the main effect block, by default [40] * 5.
+            The hidden layer architecture of each subnetwork in the main effect block, by default [100].
         subnet_size_interaction : list of int
-            The hidden layer architecture of each subnetwork in the interaction block, by default [40] * 5.
+            The hidden layer architecture of each subnetwork in the interaction block, by default [200].
         activation_func : torch funciton
             The activation function, by default torch.nn.ReLU().
         max_epochs : list of int
-            The max number of epochs in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default [1000, 1000, 100].
+            The max number of epochs in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default [1000, 1000, 1000].
         learning_rates : list of float
-            The initial learning rates of Adam optimizer in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default [1e-4, 1e-4, 1e-4].
+            The initial learning rates of Adam optimizer in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default [1e-3, 1e-3, 1e-3].
         early_stop_thres : list of int or "auto"
             The early stopping threshold in the first (main effect training), second (interaction training), and third (fine tuning) stages, respectively, by default ["auto", "auto", "auto"].
             In auto mode, the value is set to min(80000 / (max_iter_per_epoch * batch_size), 100).
@@ -83,6 +83,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             The feature index list with monotonic decreasing constraint, by default None.
         boundary_clip : bool
             In the inference stage, whether to clip the feature values by their min and max values in the training data, by default True.
+        normalize : bool
+            Whether to to normalize the data before inputing to the network, by default True.
         verbose : bool
             Whether to output the training logs, by default False.
         device : string
@@ -93,12 +95,12 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
     def __init__(self, loss_fn,
                  meta_info=None,
-                 interact_num=20,
-                 subnet_size_main_effect=[40] * 5,
-                 subnet_size_interaction=[40] * 5,
+                 interact_num=10,
+                 subnet_size_main_effect=[100],
+                 subnet_size_interaction=[200],
                  activation_func=torch.nn.ReLU(),
-                 max_epochs=[1000, 1000, 100],
-                 learning_rates=[1e-4, 1e-4, 1e-4],
+                 max_epochs=[1000, 1000, 1000],
+                 learning_rates=[1e-3, 1e-3, 1e-3],
                  early_stop_thres=["auto", "auto", "auto"],
                  batch_size=1000,
                  batch_size_inference=1000,
@@ -116,6 +118,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                  mono_increasing_list=None,
                  mono_decreasing_list=None,
                  boundary_clip=True,
+                 normalize=True,
                  verbose=False,
                  device="cpu",
                  random_state=0):
@@ -153,6 +156,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.mono_sample_size = mono_sample_size
 
         self.boundary_clip = boundary_clip
+        self.normalize = normalize
         self.verbose = verbose
         self.device = device
         self.random_state = random_state
@@ -204,16 +208,16 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         for iterations in range(train_size // batch_size):
             offset = (iterations * batch_size) % train_size
             batch_data = xx[offset:(offset + batch_size), :]
-            batch_data_clipped = torch.max(torch.min(batch_data,
-                                       self.max_value), self.min_value)
+            batch_data = torch.max(torch.min(batch_data, self.max_value), self.min_value) if self.boundary_clip else batch_xx
+            batch_data = (batch_data - self.mu_list) / self.std_list if self.normalize else batch_data
             with torch.no_grad():
-                pred.append(self.net.main_effect_blocks(batch_data_clipped).detach())
+                pred.append(self.net.main_effect_blocks(batch_data).detach())
         if train_size % batch_size > 0:
             batch_data = xx[((iterations + 1) * batch_size):, :]
-            batch_data_clipped = torch.max(torch.min(batch_data,
-                                       self.max_value), self.min_value)
+            batch_data = torch.max(torch.min(batch_data, self.max_value), self.min_value) if self.boundary_clip else batch_xx
+            batch_data = (batch_data - self.mu_list) / self.std_list if self.normalize else batch_data
             with torch.no_grad():
-                pred.append(self.net.main_effect_blocks(batch_data_clipped).detach())
+                pred.append(self.net.main_effect_blocks(batch_data).detach())
         return torch.vstack(pred)
 
     def get_interaction_raw_output(self, x):
@@ -226,16 +230,16 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         for iterations in range(train_size // batch_size):
             offset = (iterations * batch_size) % train_size
             batch_data = xx[offset:(offset + batch_size), :]
-            batch_data_clipped = torch.max(torch.min(batch_data,
-                                       self.max_value), self.min_value)
+            batch_data = torch.max(torch.min(batch_data, self.max_value), self.min_value) if self.boundary_clip else batch_xx
+            batch_data = (batch_data - self.mu_list) / self.std_list if self.normalize else batch_data
             with torch.no_grad():
-                pred.append(self.net.interaction_blocks(batch_data_clipped).detach())
+                pred.append(self.net.interaction_blocks(batch_data).detach())
         if train_size % batch_size > 0:
             batch_data = xx[((iterations + 1) * batch_size):, :]
-            batch_data_clipped = torch.max(torch.min(batch_data,
-                                       self.max_value), self.min_value)
+            batch_data = torch.max(torch.min(batch_data, self.max_value), self.min_value) if self.boundary_clip else batch_xx
+            batch_data = (batch_data - self.mu_list) / self.std_list if self.normalize else batch_data
             with torch.no_grad():
-                pred.append(self.net.interaction_blocks(batch_data_clipped).detach())
+                pred.append(self.net.interaction_blocks(batch_data).detach())
         return torch.vstack(pred)
 
     def get_clarity_loss(self, x=None, sample_weight=None):
@@ -247,7 +251,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         data_generator = FastTensorDataLoader(xx, batch_size=self.batch_size_inference, shuffle=False)
         for batch_no, batch_data in enumerate(data_generator):
             batch_xx = batch_data[0]
-            batch_xx = torch.max(torch.min(batch_xx, self.max_value), self.min_value) if self.boundary_clip else batch_xx
             self.net(batch_xx, sample_weight=sample_weight,
                        main_effect=True, interaction=True, clarity=True, monotonicity=False)
             clarity_loss += len(batch_data[0]) * self.net.clarity_loss.detach().cpu().numpy()
@@ -263,7 +266,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         data_generator = FastTensorDataLoader(xx, batch_size=self.batch_size_inference, shuffle=False)
         for batch_no, batch_data in enumerate(data_generator):
             batch_xx = batch_data[0]
-            batch_xx = torch.max(torch.min(batch_xx, self.max_value), self.min_value) if self.boundary_clip else batch_xx
             self.net(batch_xx, sample_weight=None,
                        main_effect=True, interaction=True, clarity=False, monotonicity=True)
             mono_loss += len(batch_data[0]) * self.net.mono_loss.detach().cpu().numpy()
@@ -287,7 +289,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         data_generator = FastTensorDataLoader(xx, batch_size=self.batch_size_inference, shuffle=False)
         for batch_no, batch_data in enumerate(data_generator):
             batch_xx = batch_data[0]
-            batch_xx = torch.max(torch.min(batch_xx, self.max_value), self.min_value) if self.boundary_clip else batch_xx
             pred.append(self.net(batch_xx, sample_weight=None,
                        main_effect=main_effect, interaction=interaction, clarity=False, monotonicity=False).detach())
         return torch.vstack(pred)
@@ -382,6 +383,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.nfeature_index_list = []
         self.num_classes_list = []
         
+        self.mu_list = []
+        self.std_list = []
         self.feature_names = []
         self.feature_types = []
         for idx, (feature_name, feature_info) in enumerate(self.meta_info.items()):
@@ -394,13 +397,19 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 self.dummy_values.update({feature_name: categories_})
                 self.feature_types.append("categorical")
                 self.feature_names.append(feature_name)
+                self.mu_list.append(0)
+                self.std_list.append(1)
             elif feature_info["type"] == "continuous":
                 self.nfeature_num += 1
                 self.nfeature_names.append(feature_name)
                 self.nfeature_index_list.append(idx)
                 self.feature_types.append("continuous")
                 self.feature_names.append(feature_name)
+                self.mu_list.append(x[:, idx].mean())
+                self.std_list.append(x[:, idx].std())
 
+        self.mu_list = torch.tensor(self.mu_list, dtype=torch.float, device=self.device)
+        self.std_list = torch.tensor(self.std_list, dtype=torch.float, device=self.device)
         val_size = min(self.max_val_size, int(self.n_samples * self.val_ratio))
         if stratified:
             tr_x, val_x, tr_y, val_y, tr_sw, val_sw, tr_idx, val_idx = train_test_split(x, y, sample_weight,
@@ -444,6 +453,12 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                       heredity=self.heredity,
                       mono_increasing_list=self.mono_increasing_list,
                       mono_decreasing_list=self.mono_decreasing_list,
+                      boundary_clip=self.boundary_clip,
+                      normalize=self.normalize,
+                      min_value=self.min_value,
+                      max_value=self.max_value,
+                      mu_list=self.mu_list,
+                      std_list=self.std_list,
                       device=self.device)
 
     def init_fit(self, x, y, sample_weight=None, stratified=False):
@@ -477,7 +492,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         last_improvement = 0
         best_validation = np.inf
-        opt = torch.optim.Adam(list(subnet.parameters()), lr=0.001)
+        opt = torch.optim.Adam(list(subnet.parameters()), lr=0.01)
         training_generator = FastTensorDataLoader(torch.tensor(x, dtype=torch.float, device=self.device),
                                     torch.tensor(y, dtype=torch.float, device=self.device),
                                     batch_size=min(200, int(0.2 * x.shape[0])), shuffle=True)
@@ -517,6 +532,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             if idx in self.nfeature_index_list:
                 simu_xx = np.zeros((self.mlp_sample_size, self.n_features))
                 simu_xx[:, idx] = np.random.uniform(self.min_value[idx], self.max_value[idx], self.mlp_sample_size)
+                if self.normalize:
+                    simu_xx[:, idx] = (simu_xx[:, idx] - self.mu_list[idx].detach().numpy()) / self.std_list[idx].detach().numpy()
                 simu_yy = surrogate_estimator[idx](simu_xx)
                 self.fit_individual_subnet(simu_xx[:, [idx]], simu_yy, self.net.main_effect_blocks.nsubnets,
                                   self.nfeature_index_list.index(idx), loss_fn=torch.nn.MSELoss(reduction="none"))
@@ -547,6 +564,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                                       num_classes=num_classes).to(torch.float).detach().cpu().numpy()
             else:
                 simu_xx[:, idx1] = np.random.uniform(self.min_value[idx1], self.max_value[idx1], self.mlp_sample_size)
+                if self.normalize:
+                    simu_xx[:, idx1] = (simu_xx[:, idx1] - self.mu_list[idx1].detach().numpy()) / self.std_list[idx1].detach().numpy()
                 x1 = simu_xx[:, [idx1]]
             if idx2 in self.cfeature_index_list:
                 num_classes = self.num_classes_list[self.cfeature_index_list.index(idx2)]
@@ -555,6 +574,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                                       num_classes=num_classes).to(torch.float).detach().cpu().numpy()
             else:
                 simu_xx[:, idx2] = np.random.uniform(self.min_value[idx2], self.max_value[idx2], self.mlp_sample_size)
+                if self.normalize:
+                    simu_xx[:, idx2] = (simu_xx[:, idx2] - self.mu_list[idx2].detach().numpy()) / self.std_list[idx2].detach().numpy()
                 x2 = simu_xx[:, [idx2]]
 
             xx = np.hstack([x1, x2])
@@ -666,7 +687,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                     if self.certify_mono(n_samples=self.mono_sample_size):
                         break
                     else:
-                        self.reg_mono = min(self.reg_mono * 2, 1e5)
+                        self.reg_mono = min(self.reg_mono * 1.2, 1e5)
                 else:
                     break
 
@@ -805,7 +826,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                     if self.certify_mono(n_samples=self.mono_sample_size):
                         break
                     else:
-                        self.reg_mono = min(self.reg_mono * 2, 1e5)
+                        self.reg_mono = min(self.reg_mono * 1.2, 1e5)
                 else:
                     break
 
@@ -934,7 +955,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                     if self.certify_mono(n_samples=self.mono_sample_size):
                         break
                     else:
-                        self.reg_mono = min(self.reg_mono * 2, 1e5)
+                        self.reg_mono = min(self.reg_mono * 1.2, 1e5)
                 else:
                     break
 
@@ -970,6 +991,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                                     self.n_features + np.array(self.active_interaction_index)]).astype(int)
         self.effect_names = np.hstack(["Intercept", np.array(self.feature_names), [self.feature_names[self.interaction_list[i][0]] + " x "
                           + self.feature_names[self.interaction_list[i][1]] for i in range(len(self.interaction_list))]])
+        self.is_fitted_ = True
 
     def summary_logs(self, save_dict=False, folder="./", name="summary_logs"):
 
@@ -1205,6 +1227,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         model_dict["mlp_sample_size"] = self.mlp_sample_size
         model_dict["max_val_size"] = self.max_val_size
         model_dict["boundary_clip"] = self.boundary_clip
+        model_dict["normalize"] = self.normalize
         model_dict["warm_start"] = self.warm_start
 
         model_dict["verbose"] = self.verbose

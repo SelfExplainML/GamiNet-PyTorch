@@ -183,7 +183,8 @@ class pyGAMINet(torch.nn.Module):
 
     def __init__(self, nfeature_index_list, cfeature_index_list, num_classes_list,
                  subnet_size_main_effect, subnet_size_interaction, activation_func,
-                 heredity, mono_increasing_list, mono_decreasing_list, device):
+                 heredity, mono_increasing_list, mono_decreasing_list, 
+                 boundary_clip, normalize, min_value, max_value, mu_list, std_list, device):
 
         super(pyGAMINet, self).__init__()
 
@@ -198,6 +199,13 @@ class pyGAMINet(torch.nn.Module):
         self.mono_increasing_list = mono_increasing_list
         self.mono_decreasing_list = mono_decreasing_list
 
+        self.boundary_clip = boundary_clip
+        self.normalize = normalize
+        self.min_value = min_value
+        self.max_value = max_value
+        self.mu_list = mu_list
+        self.std_list = std_list
+        
         self.device = device
         self.interaction_status = False
         self.main_effect_blocks = pyGAMNet(nfeature_index_list=nfeature_index_list,
@@ -275,10 +283,12 @@ class pyGAMINet(torch.nn.Module):
 
     def forward(self, inputs, main_effect=True, interaction=True, clarity=False, monotonicity=False, sample_weight=None):
 
-        outputs = self.output_bias
         main_effect_outputs = None
         interaction_outputs = None
         inputs.requires_grad = True
+        outputs = self.output_bias * torch.ones(inputs.shape[0], 1)
+        inputs = torch.max(torch.min(inputs, self.max_value), self.min_value) if self.boundary_clip else inputs
+        inputs = (inputs - self.mu_list) / self.std_list if self.normalize else inputs
         if main_effect:
             main_effect_weights = self.main_effect_switcher * self.main_effect_weights
             main_effect_outputs = self.main_effect_blocks(inputs) * main_effect_weights.ravel()

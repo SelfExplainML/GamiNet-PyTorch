@@ -6,21 +6,21 @@ from sklearn.utils import check_X_y, column_or_1d
 from sklearn.base import RegressorMixin, ClassifierMixin, BaseEstimator
 
 from pygam.terms import TermList
-from pygam import LinearGAM, LogisticGAM, f, s, te
+from pygam import LinearGAM, LogisticGAM, s, te
 
 from .base import GAMINet
 
 
 class GAMINetRegressor(GAMINet, RegressorMixin):
 
-    def __init__(self, meta_info=None, interact_num=20,
-                 subnet_size_main_effect=[40] * 5, subnet_size_interaction=[40] * 5, activation_func=torch.nn.ReLU(),
-                 max_epochs=[1000, 1000, 100], learning_rates=[1e-3, 1e-3, 1e-3], early_stop_thres=["auto", "auto", "auto"],
+    def __init__(self, meta_info=None, interact_num=10,
+                 subnet_size_main_effect=[100], subnet_size_interaction=[200], activation_func=torch.nn.ReLU(),
+                 max_epochs=[1000, 1000, 1000], learning_rates=[1e-3, 1e-3, 1e-3], early_stop_thres=["auto", "auto", "auto"],
                  batch_size=200, batch_size_inference=10000, max_iter_per_epoch=100, val_ratio=0.2, max_val_size=10000, 
                  warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, 
                  heredity=True, reg_clarity=0.1, loss_threshold=0.0, 
                  reg_mono=0.1, mono_increasing_list=None, mono_decreasing_list=None, mono_sample_size=200,
-                 boundary_clip=True, verbose=False, device="cpu", random_state=0):
+                 boundary_clip=True, normalize=True, verbose=False, device="cpu", random_state=0):
 
         super(GAMINetRegressor, self).__init__(loss_fn=torch.nn.MSELoss(reduction="none"),
                                    meta_info=meta_info,
@@ -47,6 +47,7 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
                                    mono_increasing_list=mono_increasing_list,
                                    mono_decreasing_list=mono_decreasing_list,
                                    boundary_clip=boundary_clip,
+                                   normalize=normalize,
                                    verbose=verbose,
                                    device=device,
                                    random_state=random_state)
@@ -61,17 +62,16 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
 
         termlist = TermList()
         for idx, (key, item) in enumerate(self.meta_info.items()):
-            if item["type"] == "continuous":
+            if (item["type"] == "continuous") or (item["type"] == "categorical"):
                 termlist += s(idx, n_splines=10, spline_order=1, lam=0.6)
-            elif item["type"] == "categorical":
-                termlist += f(idx)
             else:
                 continue
 
         gam = LinearGAM(termlist)
         allx = torch.vstack([self.tr_x, self.val_x])
         ally = torch.vstack([self.tr_y, self.val_y])
-        
+        allx = (allx - self.mu_list) / self.std_list if self.normalize else allx
+
         suffleidx = np.arange(allx.shape[0])
         np.random.shuffle(suffleidx)
         subx = allx[suffleidx][:self.gam_sample_size]
@@ -95,13 +95,13 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
         gam = LinearGAM(termlist)
         allx = torch.vstack([self.tr_x, self.val_x])
         ally = torch.vstack([self.tr_y, self.val_y])
-        
+
         suffleidx = np.arange(allx.shape[0])
         np.random.shuffle(suffleidx)
         subx = allx[suffleidx][:self.gam_sample_size]
         suby = ally[suffleidx][:self.gam_sample_size]
         residual = (suby - self.decision_function(subx, main_effect=True, interaction=False))
-        gam.fit(subx.detach().cpu().numpy(), residual.detach().cpu().numpy())
+        gam.fit(((subx - self.mu_list) / self.std_list if self.normalize else subx).detach().cpu().numpy(), residual.detach().cpu().numpy())
 
         def margial_effect(i):
             return lambda x: gam.partial_dependence(i, x)
@@ -144,14 +144,14 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
 
 class GAMINetClassifier(GAMINet, ClassifierMixin):
 
-    def __init__(self, meta_info=None, interact_num=20,
-                 subnet_size_main_effect=[40] * 5, subnet_size_interaction=[40] * 5, activation_func=torch.nn.ReLU(),
+    def __init__(self, meta_info=None, interact_num=10,
+                 subnet_size_main_effect=[100], subnet_size_interaction=[200], activation_func=torch.nn.ReLU(),
                  max_epochs=[1000, 1000, 100], learning_rates=[1e-3, 1e-3, 1e-3], early_stop_thres=["auto", "auto", "auto"],
                  batch_size=200, batch_size_inference=10000, max_iter_per_epoch=100, val_ratio=0.2, max_val_size=10000, 
                  warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, 
                  heredity=True, reg_clarity=0.1, loss_threshold=0.0, 
                  reg_mono=0.1, mono_increasing_list=None, mono_decreasing_list=None, mono_sample_size=200,
-                 boundary_clip=True, verbose=False, device="cpu", random_state=0):
+                 boundary_clip=True, normalize=True, verbose=False, device="cpu", random_state=0):
 
         super(GAMINetClassifier, self).__init__(loss_fn=torch.nn.BCEWithLogitsLoss(reduction="none"),
                                    meta_info=meta_info,
@@ -178,6 +178,7 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
                                    mono_increasing_list=mono_increasing_list,
                                    mono_decreasing_list=mono_decreasing_list,
                                    boundary_clip=boundary_clip,
+                                   normalize=normalize,
                                    verbose=verbose,
                                    device=device,
                                    random_state=random_state)
@@ -200,16 +201,15 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
 
         termlist = TermList()
         for idx, (key, item) in enumerate(self.meta_info.items()):
-            if item["type"] == "continuous":
+            if (item["type"] == "continuous") or (item["type"] == "categorical"):
                 termlist += s(idx, n_splines=10, spline_order=1, lam=0.6)
-            elif item["type"] == "categorical":
-                termlist += f(idx)
             else:
                 continue
 
         gam = LinearGAM(termlist)
         allx = torch.vstack([self.tr_x, self.val_x])
         ally = torch.vstack([self.tr_y, self.val_y]) * 4 - 2
+        allx = (allx - self.mu_list) / self.std_list if self.normalize else allx
 
         suffleidx = np.arange(allx.shape[0])
         np.random.shuffle(suffleidx)
@@ -234,12 +234,13 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
         gam = LinearGAM(termlist)
         allx = torch.vstack([self.tr_x, self.val_x])
         ally = torch.vstack([self.tr_y, self.val_y])
+
         suffleidx = np.arange(allx.shape[0])
         np.random.shuffle(suffleidx)
         subx = allx[suffleidx][:self.gam_sample_size]
         suby = ally[suffleidx][:self.gam_sample_size]
         residual = (suby - self.predict_proba(subx, main_effect=True, interaction=False)[:, [1]])
-        gam.fit(subx.detach().cpu().numpy(), residual.detach().cpu().numpy())
+        gam.fit(((subx - self.mu_list) / self.std_list if self.normalize else subx).detach().cpu().numpy(), residual.detach().cpu().numpy())
 
         def margial_effect(i):
             return lambda x: gam.partial_dependence(i, x)
