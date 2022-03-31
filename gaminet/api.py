@@ -14,7 +14,7 @@ from .base import GAMINet
 class GAMINetRegressor(GAMINet, RegressorMixin):
 
     def __init__(self, meta_info=None, interact_num=10,
-                 subnet_size_main_effect=[100], subnet_size_interaction=[200], activation_func=torch.nn.ReLU(),
+                 subnet_size_main_effect=[20], subnet_size_interaction=[20, 20], activation_func=torch.nn.ReLU(),
                  max_epochs=[1000, 1000, 1000], learning_rates=[1e-3, 1e-3, 1e-3], early_stop_thres=["auto", "auto", "auto"],
                  batch_size=200, batch_size_inference=10000, max_iter_per_epoch=100, val_ratio=0.2, max_val_size=10000, 
                  warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, 
@@ -145,8 +145,8 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
 class GAMINetClassifier(GAMINet, ClassifierMixin):
 
     def __init__(self, meta_info=None, interact_num=10,
-                 subnet_size_main_effect=[100], subnet_size_interaction=[200], activation_func=torch.nn.ReLU(),
-                 max_epochs=[1000, 1000, 100], learning_rates=[1e-3, 1e-3, 1e-3], early_stop_thres=["auto", "auto", "auto"],
+                 subnet_size_main_effect=[20], subnet_size_interaction=[20, 20], activation_func=torch.nn.ReLU(),
+                 max_epochs=[1000, 1000, 1000], learning_rates=[1e-3, 1e-3, 1e-3], early_stop_thres=["auto", "auto", "auto"],
                  batch_size=200, batch_size_inference=10000, max_iter_per_epoch=100, val_ratio=0.2, max_val_size=10000, 
                  warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, 
                  heredity=True, reg_clarity=0.1, loss_threshold=0.0, 

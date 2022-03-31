@@ -30,9 +30,9 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         interact_num : int
             The max number of interactions to be included in the second stage training, by default 10.
         subnet_size_main_effect : list of int
-            The hidden layer architecture of each subnetwork in the main effect block, by default [100].
+            The hidden layer architecture of each subnetwork in the main effect block, by default [20].
         subnet_size_interaction : list of int
-            The hidden layer architecture of each subnetwork in the interaction block, by default [200].
+            The hidden layer architecture of each subnetwork in the interaction block, by default [20, 20].
         activation_func : torch funciton
             The activation function, by default torch.nn.ReLU().
         max_epochs : list of int
@@ -96,8 +96,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
     def __init__(self, loss_fn,
                  meta_info=None,
                  interact_num=10,
-                 subnet_size_main_effect=[100],
-                 subnet_size_interaction=[200],
+                 subnet_size_main_effect=[20],
+                 subnet_size_interaction=[20, 20],
                  activation_func=torch.nn.ReLU(),
                  max_epochs=[1000, 1000, 1000],
                  learning_rates=[1e-3, 1e-3, 1e-3],
