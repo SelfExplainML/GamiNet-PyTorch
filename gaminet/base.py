@@ -437,7 +437,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 self.early_stop_thres[i] = min(int(80000 / (self.max_iter_per_epoch * self.batch_size)), 100)
         self.estimate_density(x, sample_weight)
 
-    def build_net(self, x, y, sample_weight):
+    def build_net(self, x, y):
 
         self.n_interactions = 0
         self.interaction_list = []
@@ -497,7 +497,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         self._validate_input(x, y)
         self.prepare_data(x, y, sample_weight, stratified)
-        self.build_net(x, y, sample_weight)
+        self.build_net(x, y)
 
     def fit_individual_subnet(self, x, y, subnet, idx, loss_fn, max_epochs=1000, batch_size=200, early_stop_thres=10):
 
