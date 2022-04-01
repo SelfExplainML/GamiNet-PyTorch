@@ -19,5 +19,5 @@ setup(name='gaminet',
       packages=['gaminet'],
       package_data=package_data,
       install_requires=['matplotlib>=3.1.3', 'numpy>=1.15.2', 'scikit-learn>=1.0.2',
-                  'joblib', 'pygam', 'tqdm', 'torch'],
+                  'joblib', 'pygam', 'tqdm', 'torch>=1.9'],
       zip_safe=False)

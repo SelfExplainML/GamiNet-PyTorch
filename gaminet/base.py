@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import pickle
 import numpy as np
@@ -30,9 +31,9 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         interact_num : int
             The max number of interactions to be included in the second stage training, by default 10.
         subnet_size_main_effect : list of int
-            The hidden layer architecture of each subnetwork in the main effect block, by default [20].
+            The hidden layer architecture of each subnetwork in the main effect block, by default [100].
         subnet_size_interaction : list of int
-            The hidden layer architecture of each subnetwork in the interaction block, by default [20, 20].
+            The hidden layer architecture of each subnetwork in the interaction block, by default [200].
         activation_func : torch funciton
             The activation function, by default torch.nn.ReLU().
         max_epochs : list of int
@@ -96,8 +97,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
     def __init__(self, loss_fn,
                  meta_info=None,
                  interact_num=10,
-                 subnet_size_main_effect=[20],
-                 subnet_size_interaction=[20, 20],
+                 subnet_size_main_effect=[100],
+                 subnet_size_interaction=[200],
                  activation_func=torch.nn.ReLU(),
                  max_epochs=[1000, 1000, 1000],
                  learning_rates=[1e-3, 1e-3, 1e-3],
@@ -480,6 +481,16 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.main_effect_val_loss = []
         self.interaction_val_loss = []
 
+        self.time_cost = {"warm_start_main_effect": 0,
+                    "warm_start_interaction": 0,
+                    "fit_main_effect": 0,
+                    "prune_main_effect": 0,
+                    "get_interaction_list": 0,
+                    "add_interaction": 0,
+                    "fit_interaction": 0,
+                    "prune_interaction": 0,
+                    "fine_tune_all": 0}
+
         # the seed may not work for data loader. this needs to be checked
         np.random.seed(self.random_state)
         torch.manual_seed(self.random_state)
@@ -525,7 +536,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         if self.verbose:
             print("#" * 15 + "Run Warm Initialization for Main Effect" + "#" * 15)
-
+        
+        start = time.time()
         surrogate_estimator, intercept = self.build_teacher_main_effect()
         self.net.output_bias.data = self.net.output_bias.data + torch.tensor(intercept, dtype=torch.float, device=self.device)
         for idx in range(self.n_features):
@@ -544,6 +556,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 simu_yy = surrogate_estimator[idx](simu_xx)
                 self.net.main_effect_blocks.csubnets.class_bias[i].data = torch.tensor(simu_yy.reshape(-1, 1),
                                                             dtype=torch.float, device=self.device)
+        self.time_cost["warm_start_main_effect"] = time.time() - start
 
     def warm_start_interaction(self):
 
@@ -553,6 +566,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         if self.verbose:
             print("#" * 15 + "Run Warm Initialization for Interaction" + "#" * 15)
 
+        start = time.time()
         surrogate_estimator, intercept = self.build_teacher_interaction()
         self.net.output_bias.data = self.net.output_bias.data + torch.tensor(intercept, dtype=torch.float, device=self.device)
         for i, (idx1, idx2) in enumerate(self.interaction_list):
@@ -583,14 +597,16 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             yy = surrogate_estimator[i](simu_xx)
             self.fit_individual_subnet(xx, yy, self.net.interaction_blocks.subnets,
                               i, loss_fn=torch.nn.MSELoss(reduction="none"))
+        self.time_cost["warm_start_interaction"] = time.time() - start
 
     def _get_interaction_list(self, x, y, w, scores, feature_names,
                               feature_types, n_jobs, model_type, num_classes):
-
+        
         active_main_effect_index = self.active_main_effect_index if self.heredity else np.arange(self.n_features)
         if (len(active_main_effect_index) == 0):
             return []
 
+        start = time.time()
         preprocessor_ = EBMPreprocessor(feature_names=feature_names,
                               feature_types=feature_types)
         preprocessor_.fit(x)
@@ -617,6 +633,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         ranked_scores = list(sorted(interaction_scores, key=lambda item: item[1], reverse=True))
         interaction_list = [ranked_scores[i][0] for i in range(len(ranked_scores))]
+        self.time_cost["get_interaction_list"] = time.time() - start
         return interaction_list
 
     def fit_main_effect(self):
@@ -630,6 +647,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         train_size = self.tr_x.shape[0]
         opt = torch.optim.Adam(list(self.net.main_effect_blocks.parameters()) +
                         [self.net.main_effect_weights, self.net.output_bias], lr=self.learning_rates[0])
+        start = time.time()
         for epoch in range(self.max_epochs[0]):
             self.net.train()
             accumulated_size = 0
@@ -701,9 +719,11 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                        aweights=self.tr_sw.cpu().numpy()).reshape(self.n_features, self.n_features))
         self.center_main_effects()
         torch.cuda.empty_cache()
+        self.time_cost["fit_main_effect"] = time.time() - start
 
     def prune_main_effect(self):
 
+        start = time.time()
         self.main_effect_val_loss = []
         sorted_index, componment_scales = self.get_main_effect_rank()
         self.net.main_effect_switcher.data = torch.tensor(np.zeros((self.n_features, 1)), dtype=torch.float,
@@ -733,9 +753,11 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         main_effect_switcher[self.active_main_effect_index] = 1
         self.net.main_effect_switcher.data = torch.tensor(main_effect_switcher, dtype=torch.float, device=self.device)
         self.net.main_effect_switcher.requires_grad = False
+        self.time_cost["prune_main_effect"] = time.time() - start
 
     def add_interaction(self):
 
+        start = time.time()
         x = torch.vstack([self.tr_x, self.val_x])
         y = torch.vstack([self.tr_y, self.val_y])
         w = torch.hstack([self.tr_sw, self.val_sw])
@@ -751,6 +773,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.interaction_list = interaction_list_all[:self.interact_num]
         self.n_interactions = len(self.interaction_list)
         self.net.init_interaction_blocks(self.interaction_list)
+        self.time_cost["add_interaction"] = time.time() - start
 
     def fit_interaction(self):
 
@@ -766,7 +789,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.warm_start_interaction()
         opt = torch.optim.Adam(list(self.net.interaction_blocks.parameters()) +
                         [self.net.interaction_weights, self.net.output_bias], lr=self.learning_rates[1])
-        
+        start = time.time()
         for epoch in range(self.max_epochs[1]):
             self.net.train()
             accumulated_size = 0
@@ -840,12 +863,14 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                                aweights=self.tr_sw.cpu().numpy()).reshape(self.n_interactions, self.n_interactions))
         self.center_interactions()
         torch.cuda.empty_cache()
+        self.time_cost["fit_interaction"] = time.time() - start
 
     def prune_interaction(self):
         
         if self.n_interactions == 0:
             return 
 
+        start = time.time()
         self.interaction_val_loss = []
         sorted_index, componment_scales = self.get_interaction_rank()
         self.net.interaction_switcher.data = torch.tensor(np.zeros((self.n_interactions, 1)), dtype=torch.float,
@@ -873,6 +898,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         interaction_switcher[self.active_interaction_index] = 1
         self.net.interaction_switcher.data = torch.tensor(interaction_switcher, dtype=torch.float, device=self.device)
         self.net.interaction_switcher.requires_grad = False
+        self.time_cost["prune_interaction"] = time.time() - start
 
     def fine_tune_all(self):
 
@@ -888,6 +914,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         if self.n_interactions > 0:
             opt_interaction = torch.optim.Adam(list(self.net.interaction_blocks.parameters()) +
                                    [self.net.interaction_weights], lr=self.learning_rates[2])
+        start = time.time()
         for epoch in range(self.max_epochs[2]):
             self.net.train()
             accumulated_size = 0
@@ -975,8 +1002,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             self.interaction_norm = np.diag(np.cov(interaction_output.T,
                                aweights=self.tr_sw.cpu().numpy()).reshape(self.n_interactions, self.n_interactions))
             self.center_interactions()
-
         torch.cuda.empty_cache()
+        self.time_cost["fine_tune_all"] = time.time() - start
 
     def _fit(self):
 
@@ -1062,7 +1089,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 main_effect_outputs = (self.net.main_effect_weights.cpu().detach().numpy()[idx]
                         * self.net.main_effect_switcher.cpu().detach().numpy()[idx]
                         * self.get_main_effect_raw_output(main_effect_inputs).cpu().numpy()[:, idx])
-                main_effect_input_ticks = (main_effect_inputs.ravel().astype(int) if len(main_effect_inputs_original) <= 6 else
+                main_effect_input_ticks = (main_effect_inputs_original.ravel().astype(int) if len(main_effect_inputs_original) <= 6 else
                               np.linspace(0.1 * len(main_effect_inputs_original), len(main_effect_inputs_original) * 0.9, 4).astype(int))
                 main_effect_input_labels = [main_effect_inputs_original[i] for i in main_effect_input_ticks]
                 if len("".join(list(map(str, main_effect_input_labels)))) > 30:
@@ -1261,7 +1288,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         model_dict["interaction_list"] = self.interaction_list
         model_dict["main_effect_val_loss"] = self.main_effect_val_loss
         model_dict["interaction_val_loss"] = self.interaction_val_loss
-
+        model_dict["time_cost"] = self.time_cost
+        
         model_dict["active_indice"] = self.active_indice
         model_dict["effect_names"] = self.effect_names
         model_dict["active_main_effect_index"] = self.active_main_effect_index
