@@ -33,7 +33,8 @@ class TensorLayer(torch.nn.Module):
                                 dtype=torch.float, requires_grad=True, device=device))
             n_hidden_nodes_prev = n_hidden_nodes
             torch.nn.init.zeros_(b)
-            torch.nn.init.orthogonal_(w)
+            for j in range(n_subnets):
+                torch.nn.init.orthogonal_(w[j])
             all_biases.append(b)
             all_weights.append(w)
         self.all_biases = torch.nn.ParameterList(all_biases)
