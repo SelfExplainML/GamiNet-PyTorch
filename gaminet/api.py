@@ -21,7 +21,7 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
                  warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, 
                  heredity=True, reg_clarity=0.1, loss_threshold=0.0, 
                  reg_mono=0.1, mono_increasing_list=None, mono_decreasing_list=None, mono_sample_size=1000,
-                 boundary_clip=True, normalize=True, verbose=False, n_jobs=-1, device="cpu", random_state=0):
+                 boundary_clip=True, normalize=True, verbose=False, n_jobs=10, device="cpu", random_state=0):
 
         super(GAMINetRegressor, self).__init__(loss_fn=torch.nn.MSELoss(reduction="none"),
                                    meta_info=meta_info,
@@ -159,7 +159,7 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
                  warm_start=True, gam_sample_size=5000, mlp_sample_size=1000, 
                  heredity=True, reg_clarity=0.1, loss_threshold=0.0, 
                  reg_mono=0.1, mono_increasing_list=None, mono_decreasing_list=None, mono_sample_size=1000,
-                 boundary_clip=True, normalize=True, verbose=False, n_jobs=-1, device="cpu", random_state=0):
+                 boundary_clip=True, normalize=True, verbose=False, n_jobs=10, device="cpu", random_state=0):
 
         super(GAMINetClassifier, self).__init__(loss_fn=torch.nn.BCEWithLogitsLoss(reduction="none"),
                                    meta_info=meta_info,

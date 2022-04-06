@@ -12,7 +12,6 @@ from joblib import Parallel, delayed, cpu_count
 
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OrdinalEncoder, MinMaxScaler
 
 from .layers import *
 from .dataloader import FastTensorDataLoader
@@ -86,7 +85,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         verbose : bool
             Whether to output the training logs, by default False.
         n_jobs : int
-            The number of cpu cores for parallel computing. -1 means all the available cpus will be used, by default -1.
+            The number of cpu cores for parallel computing. -1 means all the available cpus will be used, by default 10.
         device : string
             The hard device name used for training, by default "cpu".
         random_state : int
@@ -119,7 +118,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                  boundary_clip=True,
                  normalize=True,
                  verbose=False,
-                 n_jobs=-1,
+                 n_jobs=10,
                  device="cpu",
                  random_state=0):
 
