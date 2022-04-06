@@ -657,7 +657,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.time_cost["warm_start_interaction"] = round(time.time() - start, 2)
 
     def _get_interaction_list(self, x, y, w, scores, feature_names,
-                              feature_types, n_jobs, model_type, num_classes):
+                      feature_types, model_type, num_classes):
 
         active_main_effect_index = self.active_main_effect_index if self.heredity else np.arange(self.n_features)
         if (len(active_main_effect_index) == 0):
@@ -686,7 +686,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
             all_pairs = [pair for pair in combinations(range(len(preprocessor_.col_types_)), 2)
                if (pair[0] in active_main_effect_index) or (pair[1] in active_main_effect_index)]
-            interaction_scores = Parallel(n_jobs=n_jobs, backend="threading")(delayed(evaluate_parallel)(pair) for pair in all_pairs)
+            interaction_scores = [evaluate_parallel(pair) for pair in all_pairs]
 
         ranked_scores = list(sorted(interaction_scores, key=lambda item: item[1], reverse=True))
         interaction_list = [ranked_scores[i][0] for i in range(len(ranked_scores))]
@@ -824,8 +824,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                                          w.detach().numpy(),
                                          scores.detach().cpu().numpy(),
                                          self.feature_names,
-                                         self.feature_types,
-                                         n_jobs=1)
+                                         self.feature_types)
 
         self.interaction_list = interaction_list_all[:self.interact_num]
         self.n_interactions = len(self.interaction_list)

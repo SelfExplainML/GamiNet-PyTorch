@@ -118,12 +118,12 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
         surrogate_estimator = [margial_effect(i) for i in range(self.n_interactions)]
         return surrogate_estimator, intercept
 
-    def get_interaction_list(self, x, y, w, scores, feature_names, feature_types, n_jobs):
+    def get_interaction_list(self, x, y, w, scores, feature_names, feature_types):
 
         num_classes = -1
         model_type = "regression"
         interaction_list = self._get_interaction_list(x, y.astype(np.float64), w, scores, feature_names, feature_types,
-                                       n_jobs, model_type, num_classes)
+                                       model_type, num_classes)
         return interaction_list
 
     def fit(self, x, y, sample_weight=None):
@@ -264,7 +264,7 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
         surrogate_estimator = [margial_effect(i) for i in range(self.n_interactions)]
         return surrogate_estimator, intercept
 
-    def get_interaction_list(self, x, y, w, scores, feature_names, feature_types, n_jobs):
+    def get_interaction_list(self, x, y, w, scores, feature_names, feature_types):
 
         num_classes = 2
         model_type = "classification"
@@ -272,7 +272,7 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
         scores = np.log(scores / (1 - scores))
 
         interaction_list = self._get_interaction_list(x, y.astype(np.int64), w, scores, feature_names,
-                                       feature_types, n_jobs, model_type, num_classes)
+                                       feature_types, model_type, num_classes)
         return interaction_list
 
     def fit(self, x, y, sample_weight=None):
