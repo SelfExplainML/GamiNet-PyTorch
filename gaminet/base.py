@@ -825,7 +825,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                                          scores.detach().cpu().numpy(),
                                          self.feature_names,
                                          self.feature_types,
-                                         n_jobs=1)
+                                         n_jobs=self.n_jobs)
 
         self.interaction_list = interaction_list_all[:self.interact_num]
         self.n_interactions = len(self.interaction_list)
