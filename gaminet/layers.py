@@ -92,13 +92,17 @@ class UnivariateOneHotEncodingLayer(torch.nn.Module):
 
 class pyGAMNet(torch.nn.Module):
 
-    def __init__(self, nfeature_index_list, cfeature_index_list, num_classes_list, subnet_arch, activation_func, device):
+    def __init__(self, nfeature_index_list, cfeature_index_list, num_classes_list,
+                 subnet_arch, activation_func, device):
 
         super(pyGAMNet, self).__init__()
 
         self.nfeature_index_list = nfeature_index_list
         self.cfeature_index_list = cfeature_index_list
         self.num_classes_list = num_classes_list
+        self.subnet_arch = subnet_arch
+        self.activation_func = activation_func
+
         if len(self.nfeature_index_list) > 0:
             self.nsubnets = TensorLayer(len(nfeature_index_list), subnet_arch, 1, activation_func, device)
         if len(self.cfeature_index_list) > 0:
@@ -115,11 +119,11 @@ class pyGAMNet(torch.nn.Module):
             output[:, self.cfeature_index_list] = self.csubnets(ctensor_inputs)
         return output
     
-    
+
 class pyInteractionNet(torch.nn.Module):
 
     def __init__(self, interaction_list, nfeature_index_list, cfeature_index_list, num_classes_list,
-                 subnet_arch, activation_func=torch.nn.ReLU(), device="cpu"):
+                 subnet_arch, activation_func, device):
         super(pyInteractionNet, self).__init__()
 
         self.interaction_list = interaction_list
@@ -127,6 +131,8 @@ class pyInteractionNet(torch.nn.Module):
         self.nfeature_index_list = nfeature_index_list
         self.cfeature_index_list = cfeature_index_list
         self.num_classes_list = num_classes_list
+        self.subnet_arch = subnet_arch
+        self.activation_func = activation_func
         self.device = device
 
         self.n_inputs1 = []
@@ -185,7 +191,7 @@ class pyGAMINet(torch.nn.Module):
     def __init__(self, nfeature_index_list, cfeature_index_list, num_classes_list,
                  subnet_size_main_effect, subnet_size_interaction, activation_func,
                  heredity, mono_increasing_list, mono_decreasing_list, 
-                 boundary_clip, normalize, min_value, max_value, mu_list, std_list, device):
+                 boundary_clip, min_value, max_value, mu_list, std_list, device):
 
         super(pyGAMINet, self).__init__()
 
@@ -201,7 +207,6 @@ class pyGAMINet(torch.nn.Module):
         self.mono_decreasing_list = mono_decreasing_list
 
         self.boundary_clip = boundary_clip
-        self.normalize = normalize
         self.min_value = min_value
         self.max_value = max_value
         self.mu_list = mu_list
@@ -282,14 +287,28 @@ class pyGAMINet(torch.nn.Module):
                                            * interaction_outputs[:, i]).mean())
         return clarity_loss
 
-    def forward(self, inputs, main_effect=True, interaction=True, clarity=False, monotonicity=False, sample_weight=None):
+    def forward_main_effect(self, inputs):
+
+        inputs = torch.max(torch.min(inputs, self.max_value), self.min_value) if self.boundary_clip else inputs
+        inputs = (inputs - self.mu_list) / self.std_list
+        outputs = self.main_effect_blocks(inputs)
+        return outputs
+
+    def forward_interaction(self, inputs):
+
+        inputs = torch.max(torch.min(inputs, self.max_value), self.min_value) if self.boundary_clip else inputs
+        inputs = (inputs - self.mu_list) / self.std_list
+        outputs = self.interaction_blocks(inputs)
+        return outputs
+
+    def forward(self, inputs, sample_weight=None, main_effect=True, interaction=True, clarity=False, monotonicity=False):
 
         main_effect_outputs = None
         interaction_outputs = None
         inputs.requires_grad = True
         outputs = self.output_bias * torch.ones(inputs.shape[0], 1)
         inputs = torch.max(torch.min(inputs, self.max_value), self.min_value) if self.boundary_clip else inputs
-        inputs = (inputs - self.mu_list) / self.std_list if self.normalize else inputs
+        inputs = (inputs - self.mu_list) / self.std_list
         if main_effect:
             main_effect_weights = self.main_effect_switcher * self.main_effect_weights
             main_effect_outputs = self.main_effect_blocks(inputs) * main_effect_weights.ravel()

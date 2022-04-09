@@ -6,10 +6,12 @@ import numpy as np
 from tqdm import tqdm
 from itertools import combinations
 from matplotlib import pylab as plt
+from joblib import Parallel, delayed
 from abc import ABCMeta, abstractmethod
 from joblib import Parallel, delayed, cpu_count
 
 from sklearn.base import BaseEstimator
+from sklearn.preprocessing import OrdinalEncoder
 from sklearn.model_selection import train_test_split
 
 from .layers import *
@@ -45,7 +47,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         batch_size : int
             The batch size, by default 1000.
             Note that it should not be larger than the training size * (1 - validation ratio). 
-        batch_size : int
+        batch_size_inference : int
             The batch size used in the inference stage by default 10000.
             It is imposed to avoid out-of-memory issue when dealing very large dataset.
         max_iter_per_epoch : int
@@ -101,7 +103,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                  learning_rates=[1e-3, 1e-3, 1e-4],
                  early_stop_thres=["auto", "auto", "auto"],
                  batch_size=1000,
-                 batch_size_inference=1000,
+                 batch_size_inference=10000,
                  max_iter_per_epoch=100,
                  val_ratio=0.2,
                  warm_start=True,
@@ -205,21 +207,18 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         batch_size = int(np.minimum(self.batch_size_inference, x.shape[0]))
         for iterations in range(train_size // batch_size):
             offset = (iterations * batch_size) % train_size
-            batch_data = xx[offset:(offset + batch_size), :]
-            batch_data = torch.max(torch.min(batch_data, self.max_value), self.min_value) if self.boundary_clip else batch_xx
-            batch_data = (batch_data - self.mu_list) / self.std_list if self.normalize else batch_data
+            batch_xx = xx[offset:(offset + batch_size), :]
             with torch.no_grad():
-                pred.append(self.net.main_effect_blocks(batch_data).detach())
+                pred.append(self.net.forward_main_effect(batch_xx).detach())
         if train_size % batch_size > 0:
-            batch_data = xx[((iterations + 1) * batch_size):, :]
-            batch_data = torch.max(torch.min(batch_data, self.max_value), self.min_value) if self.boundary_clip else batch_xx
-            batch_data = (batch_data - self.mu_list) / self.std_list if self.normalize else batch_data
+            batch_xx = xx[((iterations + 1) * batch_size):, :]
             with torch.no_grad():
-                pred.append(self.net.main_effect_blocks(batch_data).detach())
+                pred.append(self.net.forward_main_effect(batch_xx).detach())
         return torch.vstack(pred)
 
     def get_interaction_raw_output(self, x):
 
+        ## need to do data normalization for 
         pred = []
         self.net.eval()
         train_size = x.shape[0]
@@ -227,24 +226,20 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         batch_size = int(np.minimum(self.batch_size_inference, x.shape[0]))
         for iterations in range(train_size // batch_size):
             offset = (iterations * batch_size) % train_size
-            batch_data = xx[offset:(offset + batch_size), :]
-            batch_data = torch.max(torch.min(batch_data, self.max_value), self.min_value) if self.boundary_clip else batch_xx
-            batch_data = (batch_data - self.mu_list) / self.std_list if self.normalize else batch_data
+            batch_xx = xx[offset:(offset + batch_size), :]
             with torch.no_grad():
-                pred.append(self.net.interaction_blocks(batch_data).detach())
+                pred.append(self.net.forward_interaction(batch_xx).detach())
         if train_size % batch_size > 0:
-            batch_data = xx[((iterations + 1) * batch_size):, :]
-            batch_data = torch.max(torch.min(batch_data, self.max_value), self.min_value) if self.boundary_clip else batch_xx
-            batch_data = (batch_data - self.mu_list) / self.std_list if self.normalize else batch_data
+            batch_xx = xx[((iterations + 1) * batch_size):, :]
             with torch.no_grad():
-                pred.append(self.net.interaction_blocks(batch_data).detach())
+                pred.append(self.net.forward_interaction(batch_xx).detach())
         return torch.vstack(pred)
 
     def get_clarity_loss(self, x=None, sample_weight=None):
 
         clarity_loss = 0
         self.net.eval()
-        x = self.tr_x if x is None else x
+        x = self.training_generator.tensors[0] if x is None else x
         xx = x if torch.is_tensor(x) else torch.tensor(x, dtype=torch.float, device=self.device)
         data_generator = FastTensorDataLoader(xx, batch_size=self.batch_size_inference, shuffle=False)
         for batch_no, batch_data in enumerate(data_generator):
@@ -259,7 +254,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         mono_loss = 0
         self.net.eval()
-        x = self.tr_x if x is None else x
+        x = self.training_generator.tensors[0] if x is None else x
         xx = x if torch.is_tensor(x) else torch.tensor(x, dtype=torch.float, device=self.device)
         data_generator = FastTensorDataLoader(xx, batch_size=self.batch_size_inference, shuffle=False)
         for batch_no, batch_data in enumerate(data_generator):
@@ -291,11 +286,11 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                        main_effect=main_effect, interaction=interaction, clarity=False, monotonicity=False).detach())
         return torch.vstack(pred)
 
-    def evaluate(self, x, y, sample_weight, main_effect=True, interaction=True):
+    def evaluate(self, main_effect=True, interaction=True):
 
-        pred = self.decision_function(x, main_effect=main_effect, interaction=interaction)
-        return torch.mean(self.loss_fn(pred.ravel(),
-                     y.ravel()) * sample_weight.ravel()).cpu().detach().numpy()
+        pred = self.decision_function(self.validation_generator.tensors[0], main_effect=main_effect, interaction=interaction)
+        loss = self.loss_fn(pred.ravel(), self.validation_generator.tensors[1].ravel() * self.validation_generator.tensors[2].ravel())
+        return torch.mean(loss).cpu().detach().numpy()
 
     def get_main_effect_rank(self):
 
@@ -385,12 +380,16 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         self.std_list = []
         self.feature_names = []
         self.feature_types = []
+        self.categorical_encoder = []
         for idx, (feature_name, feature_info) in enumerate(self.meta_info.items()):
             if feature_info["type"] == "categorical":
                 self.cfeature_num += 1
                 self.cfeature_names.append(feature_name)
                 self.cfeature_index_list.append(idx)
                 categories_ = np.unique(x[:, [idx]])
+                enc = OrdinalEncoder().fit(x[:, [idx]])
+                categories_ = enc.categories_[0]
+                self.categorical_encoder.append(enc)
                 self.num_classes_list.append(len(categories_))
                 self.dummy_values.update({feature_name: categories_})
                 self.feature_types.append("categorical")
@@ -403,8 +402,12 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 self.nfeature_index_list.append(idx)
                 self.feature_types.append("continuous")
                 self.feature_names.append(feature_name)
-                self.mu_list.append(x[:, idx].mean())
-                self.std_list.append(x[:, idx].std())
+                if self.normalize:
+                    self.mu_list.append(x[:, idx].mean())
+                    self.std_list.append(x[:, idx].std())
+                else:
+                    self.mu_list.append(0)
+                    self.std_list.append(1)
 
         self.mu_list = torch.tensor(self.mu_list, dtype=torch.float, device=self.device)
         self.std_list = torch.tensor(self.std_list, dtype=torch.float, device=self.device)
@@ -418,16 +421,17 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         self.tr_idx = tr_idx
         self.val_idx = val_idx
-        self.tr_x = torch.tensor(tr_x, dtype=torch.float, device=self.device)
-        self.tr_y = torch.tensor(tr_y, dtype=torch.float, device=self.device)
-        self.tr_sw = torch.tensor(tr_sw, dtype=torch.float, device=self.device)
-        self.val_x = torch.tensor(val_x, dtype=torch.float, device=self.device)
-        self.val_y = torch.tensor(val_y, dtype=torch.float, device=self.device)
-        self.val_sw = torch.tensor(val_sw, dtype=torch.float, device=self.device)
+        self.batch_size = min(self.batch_size, tr_x.shape[0])
         self.min_value = torch.tensor(np.min(x, axis=0), dtype=torch.float, device=self.device)
         self.max_value = torch.tensor(np.max(x, axis=0), dtype=torch.float, device=self.device)
-        self.training_generator = FastTensorDataLoader(self.tr_x, self.tr_y, self.tr_sw,
-                                        batch_size=self.batch_size, shuffle=True)
+        self.training_generator = FastTensorDataLoader(torch.tensor(tr_x, dtype=torch.float, device=self.device),
+                                                       torch.tensor(tr_y, dtype=torch.float, device=self.device),
+                                                       torch.tensor(tr_sw, dtype=torch.float, device=self.device),
+                                                       batch_size=self.batch_size, shuffle=True)
+        self.validation_generator = FastTensorDataLoader(torch.tensor(val_x, dtype=torch.float, device=self.device),
+                                                       torch.tensor(val_y, dtype=torch.float, device=self.device),
+                                                       torch.tensor(val_sw, dtype=torch.float, device=self.device),
+                                                       batch_size=self.batch_size_inference, shuffle=False)
         self.max_iter_per_epoch = min(len(self.training_generator), self.max_iter_per_epoch)
         for i, item in enumerate(self.early_stop_thres):
             if item == "auto":
@@ -451,7 +455,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                       mono_increasing_list=self.mono_increasing_list,
                       mono_decreasing_list=self.mono_decreasing_list,
                       boundary_clip=self.boundary_clip,
-                      normalize=self.normalize,
                       min_value=self.min_value,
                       max_value=self.max_value,
                       mu_list=self.mu_list,
@@ -546,7 +549,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             simu_xx = np.zeros((self.mlp_sample_size, self.n_features))
             simu_xx[:, idx] = np.random.uniform(self.min_value[idx], self.max_value[idx], self.mlp_sample_size)
             if self.normalize:
-                simu_xx[:, idx] = (simu_xx[:, idx] - self.mu_list[idx].detach().numpy()) / self.std_list[idx].detach().numpy()
+                simu_xx[:, idx] = (simu_xx[:, idx] - self.mu_list[idx].detach().cpu().numpy()) / self.std_list[idx].detach().cpu().numpy()
             simu_yy = surrogate_estimator[idx](simu_xx)
             self.fit_individual_subnet(simu_xx[:, [idx]], simu_yy, self.net.main_effect_blocks.nsubnets,
                               self.nfeature_index_list.index(idx), loss_fn=torch.nn.MSELoss(reduction="none"))
@@ -609,7 +612,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             else:
                 simu_xx[:, idx1] = np.random.uniform(self.min_value[idx1], self.max_value[idx1], self.mlp_sample_size)
                 if self.normalize:
-                    simu_xx[:, idx1] = (simu_xx[:, idx1] - self.mu_list[idx1].detach().numpy()) / self.std_list[idx1].detach().numpy()
+                    simu_xx[:, idx1] = (simu_xx[:, idx1] -
+                                self.mu_list[idx1].detach().cpu().numpy()) / self.std_list[idx1].detach().cpu().numpy()
                 x1 = simu_xx[:, [idx1]]
                 x1grid = np.linspace(self.min_value[idx1], self.max_value[idx1], 20).reshape(-1, 1)
             if idx2 in self.cfeature_index_list:
@@ -621,7 +625,8 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             else:
                 simu_xx[:, idx2] = np.random.uniform(self.min_value[idx2], self.max_value[idx2], self.mlp_sample_size)
                 if self.normalize:
-                    simu_xx[:, idx2] = (simu_xx[:, idx2] - self.mu_list[idx2].detach().numpy()) / self.std_list[idx2].detach().numpy()
+                    simu_xx[:, idx2] = (simu_xx[:, idx2] - 
+                                self.mu_list[idx2].detach().cpu().numpy()) / self.std_list[idx2].detach().cpu().numpy()
                 x2 = simu_xx[:, [idx2]]
                 x2grid = np.linspace(self.min_value[idx1], self.max_value[idx1], 20).reshape(-1, 1)
 
@@ -678,13 +683,13 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             model_type, num_classes, features_categorical, features_bin_count, X, y, w, scores, optional_temp_params=None
         ) as interaction_detector:
 
-            def evaluate_parallel(pair):
+            def evaluate(pair):
                 score = interaction_detector.get_interaction_score(pair, min_samples_leaf=2)
                 return pair, score
 
             all_pairs = [pair for pair in combinations(range(len(preprocessor_.col_types_)), 2)
                if (pair[0] in active_main_effect_index) or (pair[1] in active_main_effect_index)]
-            interaction_scores = [evaluate_parallel(pair) for pair in all_pairs]
+            interaction_scores = [evaluate(pair) for pair in all_pairs]
 
         ranked_scores = list(sorted(interaction_scores, key=lambda item: item[1], reverse=True))
         interaction_list = [ranked_scores[i][0] for i in range(len(ranked_scores))]
@@ -699,7 +704,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         last_improvement = 0
         best_validation = np.inf
         self.warm_start_main_effect()
-        train_size = self.tr_x.shape[0]
         opt = torch.optim.Adam(list(self.net.main_effect_blocks.parameters()) +
                         [self.net.main_effect_weights, self.net.output_bias], lr=self.learning_rates[0])
         start = time.time()
@@ -745,8 +749,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 if batch_no == (len(self.training_generator) - 1) or batch_no == (self.max_iter_per_epoch - 1):
                     self.net.eval()
                     self.err_train_main_effect_training.append(accumulated_loss / accumulated_size)
-                    self.err_val_main_effect_training.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
-                                                         main_effect=True, interaction=False))
+                    self.err_val_main_effect_training.append(self.evaluate(main_effect=True, interaction=False))
                     if self.verbose:
                         pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[0]))) + 1)
                               + "d, train loss: %0.5f, validation loss: %0.5f") % 
@@ -768,10 +771,10 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             print("Main Effect Training Stop at Epoch: %d, train loss: %0.5f, validation loss: %0.5f" %
                         (epoch + 1, self.err_train_main_effect_training[-1], self.err_val_main_effect_training[-1]))  
 
-        main_effect_output = self.get_main_effect_raw_output(self.tr_x).cpu().numpy()
-        self.main_effect_mean = np.average(main_effect_output, axis=0, weights=self.tr_sw.cpu().numpy())
+        main_effect_output = self.get_main_effect_raw_output(self.training_generator.tensors[0]).cpu().numpy()
+        self.main_effect_mean = np.average(main_effect_output, axis=0, weights=self.training_generator.tensors[2].cpu().numpy())
         self.main_effect_norm = np.diag(np.cov(main_effect_output.T,
-                       aweights=self.tr_sw.cpu().numpy()).reshape(self.n_features, self.n_features))
+                       aweights=self.training_generator.tensors[2].cpu().numpy()).reshape(self.n_features, self.n_features))
         self.center_main_effects()
         torch.cuda.empty_cache()
         self.time_cost["fit_main_effect"] = round(time.time() - start, 2)
@@ -783,18 +786,14 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         sorted_index, componment_scales = self.get_main_effect_rank()
         self.net.main_effect_switcher.data = torch.tensor(np.zeros((self.n_features, 1)), dtype=torch.float,
                                           device=self.device, requires_grad=False)
-        self.main_effect_val_loss.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
-                                        main_effect=True, interaction=False))
+        self.main_effect_val_loss.append(self.evaluate(main_effect=True, interaction=False))
         for idx in range(self.n_features):
             selected_index = sorted_index[:(idx + 1)]
             main_effect_switcher = np.zeros((self.n_features, 1))
             main_effect_switcher[selected_index] = 1
             self.net.main_effect_switcher.data = torch.tensor(main_effect_switcher, dtype=torch.float,
                                               device=self.device, requires_grad=False)
-            val_loss = self.evaluate(self.val_x,
-                             self.val_y,
-                             self.val_sw,
-                             main_effect=True, interaction=False)
+            val_loss = self.evaluate(main_effect=True, interaction=False)
             self.main_effect_val_loss.append(val_loss)
 
         best_idx = np.argmin(self.main_effect_val_loss)
@@ -813,16 +812,11 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
     def add_interaction(self):
 
         start = time.time()
-        x = torch.vstack([self.tr_x, self.val_x])
-        y = torch.vstack([self.tr_y, self.val_y])
-        w = torch.hstack([self.tr_sw, self.val_sw])
-        scores = self.decision_function(x, main_effect=True, interaction=False)
-        interaction_list_all = self.get_interaction_list(x.detach().cpu().numpy(),
-                                         y.detach().cpu().numpy(),
-                                         w.detach().numpy(),
-                                         scores.detach().cpu().numpy(),
-                                         self.feature_names,
-                                         self.feature_types)
+        x = torch.vstack([self.training_generator.tensors[0], self.validation_generator.tensors[0]]).cpu().numpy()
+        y = torch.vstack([self.training_generator.tensors[1], self.validation_generator.tensors[1]]).cpu().numpy()
+        w = torch.hstack([self.training_generator.tensors[2], self.validation_generator.tensors[2]]).cpu().numpy()
+        scores = self.decision_function(x, main_effect=True, interaction=False).detach().cpu().numpy()
+        interaction_list_all = self.get_interaction_list(x, y, w, scores, self.feature_names, self.feature_types)
 
         self.interaction_list = interaction_list_all[:self.interact_num]
         self.n_interactions = len(self.interaction_list)
@@ -839,7 +833,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         last_improvement = 0
         best_validation = np.inf
-        train_size = self.tr_x.shape[0]
         self.warm_start_interaction()
         opt = torch.optim.Adam(list(self.net.interaction_blocks.parameters()) +
                         [self.net.interaction_weights, self.net.output_bias], lr=self.learning_rates[1])
@@ -888,8 +881,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 if batch_no == (len(self.training_generator) - 1) or batch_no == (self.max_iter_per_epoch - 1):
                     self.net.eval()
                     self.err_train_interaction_training.append(accumulated_loss / accumulated_size)
-                    self.err_val_interaction_training.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
-                                                         main_effect=True, interaction=True))
+                    self.err_val_interaction_training.append(self.evaluate(main_effect=True, interaction=True))
                     if self.verbose:
                         pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[1]))) + 1)
                               + "d, train loss: %0.5f, validation loss: %0.5f") % 
@@ -911,10 +903,10 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             print("Interaction Training Stop at Epoch: %d, train loss: %0.5f, validation loss: %0.5f" %
               (epoch + 1, self.err_train_interaction_training[-1], self.err_val_interaction_training[-1]))  
 
-        interaction_output = self.get_interaction_raw_output(self.tr_x).cpu().numpy()
-        self.interaction_mean = np.average(interaction_output, axis=0, weights=self.tr_sw.cpu().numpy())
+        interaction_output = self.get_interaction_raw_output(self.training_generator.tensors[0]).cpu().numpy()
+        self.interaction_mean = np.average(interaction_output, axis=0, weights=self.training_generator.tensors[2].cpu().numpy())
         self.interaction_norm = np.diag(np.cov(interaction_output.T,
-                               aweights=self.tr_sw.cpu().numpy()).reshape(self.n_interactions, self.n_interactions))
+                   aweights=self.training_generator.tensors[2].cpu().numpy()).reshape(self.n_interactions, self.n_interactions))
         self.center_interactions()
         torch.cuda.empty_cache()
         self.time_cost["fit_interaction"] = round(time.time() - start, 2)
@@ -929,16 +921,14 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         sorted_index, componment_scales = self.get_interaction_rank()
         self.net.interaction_switcher.data = torch.tensor(np.zeros((self.n_interactions, 1)), dtype=torch.float,
                                           device=self.device, requires_grad=False)
-        self.interaction_val_loss.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
-                              main_effect=True, interaction=True))
+        self.interaction_val_loss.append(self.evaluate(main_effect=True, interaction=True))
         for idx in range(self.n_interactions):
             selected_index = sorted_index[:(idx + 1)]
             interaction_switcher = np.zeros((self.n_interactions, 1))
             interaction_switcher[selected_index] = 1
             self.net.interaction_switcher.data = torch.tensor(interaction_switcher, dtype=torch.float,
                                               device=self.device, requires_grad=False)
-            val_loss = self.evaluate(self.val_x, self.val_y, self.val_sw,
-                             main_effect=True, interaction=True)
+            val_loss = self.evaluate(main_effect=True, interaction=True)
             self.interaction_val_loss.append(val_loss)
 
         best_idx = np.argmin(self.interaction_val_loss)
@@ -961,7 +951,6 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
 
         last_improvement = 0
         best_validation = np.inf
-        train_size = self.tr_x.shape[0]
         opt_main_effect = torch.optim.Adam(list(self.net.main_effect_blocks.parameters()) +
                                 [self.net.main_effect_weights, self.net.output_bias],
                                 lr=self.learning_rates[2])
@@ -1021,8 +1010,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
                 if batch_no == (len(self.training_generator) - 1) or batch_no == (self.max_iter_per_epoch - 1):
                     self.net.eval()
                     self.err_train_tuning.append(accumulated_loss / accumulated_size)
-                    self.err_val_tuning.append(self.evaluate(self.val_x, self.val_y, self.val_sw,
-                                                         main_effect=True, interaction=True))
+                    self.err_val_tuning.append(self.evaluate(main_effect=True, interaction=True))
                     if self.verbose:
                         pbar.set_description(("Epoch: %" + str(int(np.ceil(np.log10(self.max_epochs[2]))) + 1)
                               + "d, train loss: %0.5f, validation loss: %0.5f") % 
@@ -1044,17 +1032,17 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             print("Fine Tuning Stop at Epoch: %d, train loss: %0.5f, validation loss: %0.5f" %
                       (epoch + 1, self.err_train_tuning[-1], self.err_val_tuning[-1]))
 
-        main_effect_output = self.get_main_effect_raw_output(self.tr_x).cpu().numpy()
-        self.main_effect_mean = np.average(main_effect_output, axis=0, weights=self.tr_sw.cpu().numpy())
+        main_effect_output = self.get_main_effect_raw_output(self.training_generator.tensors[0]).cpu().numpy()
+        self.main_effect_mean = np.average(main_effect_output, axis=0, weights=self.training_generator.tensors[2].cpu().numpy())
         self.main_effect_norm = np.diag(np.cov(main_effect_output.T,
-                               aweights=self.tr_sw.cpu().numpy()).reshape(self.n_features, self.n_features))
+                       aweights=self.training_generator.tensors[2].cpu().numpy()).reshape(self.n_features, self.n_features))
         self.center_main_effects()
 
         if self.n_interactions > 0:
-            interaction_output = self.get_interaction_raw_output(self.tr_x).cpu().numpy()
-            self.interaction_mean = np.average(interaction_output, axis=0, weights=self.tr_sw.cpu().numpy())
+            interaction_output = self.get_interaction_raw_output(self.training_generator.tensors[0]).cpu().numpy()
+            self.interaction_mean = np.average(interaction_output, axis=0, weights=self.training_generator.tensors[2].cpu().numpy())
             self.interaction_norm = np.diag(np.cov(interaction_output.T,
-                               aweights=self.tr_sw.cpu().numpy()).reshape(self.n_interactions, self.n_interactions))
+                       aweights=self.training_generator.tensors[2].cpu().numpy()).reshape(self.n_interactions, self.n_interactions))
             self.center_interactions()
         torch.cuda.empty_cache()
         self.time_cost["fine_tune_all"] = round(time.time() - start, 2)
@@ -1098,7 +1086,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
         return data_dict_log
 
     def partial_derivatives(self, feature_idx, n_samples=10000):
-        
+
         np.random.seed(self.random_state)
         inputs = np.random.uniform(self.min_value, self.max_value, size=(n_samples, len(self.max_value)))
         inputs = torch.tensor(inputs, dtype=torch.float, device=self.device)
@@ -1117,7 +1105,7 @@ class GAMINet(BaseEstimator, metaclass=ABCMeta):
             plt.title("Violating Size: %0.2f%%" % (np.where(grad[:, feature_idx] > 0)[0].shape[0] / n_samples * 100))
         plt.show()
 
-    def global_explain(self, main_grid_size=100, interact_grid_size=100, save_dict=False, folder="./", name="global_explain"):
+    def global_explain(self, main_grid_size=100, interact_grid_size=20, save_dict=False, folder="./", name="global_explain"):
 
         # By default, we use the same main_grid_size and interact_grid_size as that of the zero mean constraint
         # Alternatively, we can also specify it manually, e.g., when we want to have the same grid size as EBM (256).        

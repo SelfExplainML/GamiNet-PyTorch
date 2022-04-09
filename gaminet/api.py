@@ -61,15 +61,10 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
 
     def build_teacher_main_effect(self):
 
-        indices = np.arange(self.n_samples)
-        allx = torch.vstack([self.tr_x, self.val_x])
-        ally = torch.vstack([self.tr_y, self.val_y])
-        allsw = torch.hstack([self.tr_sw, self.val_sw])
-        _, suffleidx = train_test_split(indices, test_size=self.gam_sample_size, random_state=self.random_state)
-        subx = allx[suffleidx]
-        subx = ((subx - self.mu_list) / self.std_list if self.normalize else subx).detach().cpu().numpy()
-        suby = ally[suffleidx].detach().cpu().numpy()
-        subsw = allsw[suffleidx].detach().cpu().numpy()
+        x = self.training_generator.tensors[0].cpu().numpy()
+        y = self.training_generator.tensors[1].cpu().numpy()
+        sw = self.training_generator.tensors[2].cpu().numpy()
+        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=self.gam_sample_size, random_state=self.random_state)
 
         termlist = TermList()
         n_splines = max(11 - np.ceil(self.n_features / 100).astype(int), 2)
@@ -80,7 +75,7 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
                 continue
 
         gam = LinearGAM(termlist)
-        gam.fit(subx, suby, weights=subsw)
+        gam.fit((tr_x - self.mu_list.cpu().numpy()) / self.std_list.cpu().numpy(), tr_y, weights=tr_sw)
 
         def margial_effect(i):
             return lambda x: gam.partial_dependence(i, x)
@@ -91,16 +86,11 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
 
     def build_teacher_interaction(self):
 
-        indices = np.arange(self.n_samples)
-        allx = torch.vstack([self.tr_x, self.val_x])
-        ally = torch.vstack([self.tr_y, self.val_y])
-        allsw = torch.hstack([self.tr_sw, self.val_sw])
-        _, suffleidx = train_test_split(indices, test_size=self.gam_sample_size, random_state=self.random_state)
-        subx = allx[suffleidx]
-        subx = ((subx - self.mu_list) / self.std_list if self.normalize else subx).detach().cpu().numpy()
-        suby = ally[suffleidx].detach().cpu().numpy()
-        subsw = allsw[suffleidx].detach().cpu().numpy()
-        residual = suby - self.decision_function(subx, main_effect=True, interaction=False).detach().cpu().numpy()
+        x = self.training_generator.tensors[0].cpu().numpy()
+        y = self.training_generator.tensors[1].cpu().numpy()
+        sw = self.training_generator.tensors[2].cpu().numpy()
+        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=self.gam_sample_size, random_state=self.random_state)
+        tr_residual = tr_y - self.predict(tr_x, main_effect=True, interaction=False)
 
         termlist = TermList()
         n_splines = max(11 - np.ceil(self.n_interactions / 10).astype(int), 2)
@@ -109,7 +99,7 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
                       s(idx2, n_splines=n_splines, spline_order=1, lam=0.6))
             
         gam = LinearGAM(termlist)
-        gam.fit(subx, residual, weights=subsw)
+        gam.fit((tr_x - self.mu_list.cpu().numpy()) / self.std_list.cpu().numpy(), tr_residual, weights=tr_sw)
 
         def margial_effect(i):
             return lambda x: gam.partial_dependence(i, x)
@@ -207,15 +197,10 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
 
     def build_teacher_main_effect(self):
 
-        indices = np.arange(self.n_samples)
-        allx = torch.vstack([self.tr_x, self.val_x])
-        ally = torch.vstack([self.tr_y, self.val_y]) * 4 - 2
-        allsw = torch.hstack([self.tr_sw, self.val_sw])
-        _, suffleidx = train_test_split(indices, test_size=self.gam_sample_size, stratify=ally, random_state=self.random_state)
-        subx = allx[suffleidx]
-        subx = ((subx - self.mu_list) / self.std_list if self.normalize else subx).detach().cpu().numpy()
-        suby = ally[suffleidx].detach().cpu().numpy()
-        subsw = allsw[suffleidx].detach().cpu().numpy()
+        x = self.training_generator.tensors[0].cpu().numpy()
+        y = self.training_generator.tensors[1].cpu().numpy() * 4 - 2
+        sw = self.training_generator.tensors[2].cpu().numpy()
+        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=self.gam_sample_size, random_state=self.random_state)
 
         termlist = TermList()
         n_splines = max(11 - np.ceil(self.n_features / 100).astype(int), 2)
@@ -226,7 +211,7 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
                 continue
 
         gam = LinearGAM(termlist)
-        gam.fit(subx, suby, weights=subsw)
+        gam.fit((tr_x - self.mu_list.cpu().numpy()) / self.std_list.cpu().numpy(), tr_y, weights=tr_sw)
 
         def margial_effect(i):
             return lambda x: gam.partial_dependence(i, x)
@@ -237,16 +222,11 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
 
     def build_teacher_interaction(self):
 
-        indices = np.arange(self.n_samples)
-        allx = torch.vstack([self.tr_x, self.val_x])
-        ally = torch.vstack([self.tr_y, self.val_y])
-        allsw = torch.hstack([self.tr_sw, self.val_sw])
-        _, suffleidx = train_test_split(indices, test_size=self.gam_sample_size, stratify=ally, random_state=self.random_state)
-        subx = allx[suffleidx]
-        subx = ((subx - self.mu_list) / self.std_list if self.normalize else subx).detach().cpu().numpy()
-        suby = ally[suffleidx].detach().cpu().numpy()
-        subsw = allsw[suffleidx].detach().cpu().numpy()
-        residual = suby - self.predict_proba(subx, main_effect=True, interaction=False)[:, [1]]
+        x = self.training_generator.tensors[0].cpu().numpy()
+        y = self.training_generator.tensors[1].cpu().numpy()
+        sw = self.training_generator.tensors[2].cpu().numpy()
+        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=self.gam_sample_size, random_state=self.random_state)
+        tr_residual = tr_y - self.predict_proba(tr_x, main_effect=True, interaction=False)[:, [1]]
 
         termlist = TermList()
         n_splines = max(11 - np.ceil(self.n_interactions / 10).astype(int), 2)
@@ -255,7 +235,7 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
                       s(idx2, n_splines=n_splines, spline_order=1, lam=0.6))
             
         gam = LinearGAM(termlist)
-        gam.fit(subx, residual, weights=subsw)
+        gam.fit((tr_x - self.mu_list.cpu().numpy()) / self.std_list.cpu().numpy(), tr_residual, weights=tr_sw)
 
         def margial_effect(i):
             return lambda x: gam.partial_dependence(i, x)

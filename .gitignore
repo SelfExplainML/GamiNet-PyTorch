@@ -1,4 +1,5 @@
 examples/.ipynb_checkpoints/*
+examples/__pycache__/*
 scripts/*
 .ipynb_checkpoints/*
 gaminet/__pycache__/*
