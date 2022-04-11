@@ -64,7 +64,7 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
         x = self.training_generator.tensors[0].cpu().numpy()
         y = self.training_generator.tensors[1].cpu().numpy()
         sw = self.training_generator.tensors[2].cpu().numpy()
-        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=self.gam_sample_size, random_state=self.random_state)
+        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=y.shape[0] - self.gam_sample_size, random_state=self.random_state)
 
         termlist = TermList()
         n_splines = max(11 - np.ceil(self.n_features / 100).astype(int), 2)
@@ -89,7 +89,7 @@ class GAMINetRegressor(GAMINet, RegressorMixin):
         x = self.training_generator.tensors[0].cpu().numpy()
         y = self.training_generator.tensors[1].cpu().numpy()
         sw = self.training_generator.tensors[2].cpu().numpy()
-        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=self.gam_sample_size, random_state=self.random_state)
+        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=y.shape[0] - self.gam_sample_size, random_state=self.random_state)
         tr_residual = tr_y - self.predict(tr_x, main_effect=True, interaction=False)
 
         termlist = TermList()
@@ -200,7 +200,7 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
         x = self.training_generator.tensors[0].cpu().numpy()
         y = self.training_generator.tensors[1].cpu().numpy() * 4 - 2
         sw = self.training_generator.tensors[2].cpu().numpy()
-        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=self.gam_sample_size, random_state=self.random_state)
+        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=y.shape[0] - self.gam_sample_size, random_state=self.random_state)
 
         termlist = TermList()
         n_splines = max(11 - np.ceil(self.n_features / 100).astype(int), 2)
@@ -225,7 +225,7 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
         x = self.training_generator.tensors[0].cpu().numpy()
         y = self.training_generator.tensors[1].cpu().numpy()
         sw = self.training_generator.tensors[2].cpu().numpy()
-        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=self.gam_sample_size, random_state=self.random_state)
+        tr_x, _, tr_y, _, tr_sw, _ = train_test_split(x, y, sw, test_size=y.shape[0] - self.gam_sample_size, random_state=self.random_state)
         tr_residual = tr_y - self.predict_proba(tr_x, main_effect=True, interaction=False)[:, [1]]
 
         termlist = TermList()
