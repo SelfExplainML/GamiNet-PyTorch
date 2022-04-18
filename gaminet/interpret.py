@@ -11,6 +11,7 @@ from pandas.core.generic import NDFrame
 from sklearn.utils.validation import check_is_fitted
 from sklearn.base import BaseEstimator, TransformerMixin
 from contextlib import AbstractContextManager
+import pkg_resources
 
 try:
     from pandas.api.types import is_numeric_dtype, is_string_dtype
@@ -18,6 +19,9 @@ except ImportError:  # pragma: no cover
     from pandas.core.dtypes.common import is_numeric_dtype, is_string_dtype
 
 log = logging.getLogger(__name__)
+
+
+# All the codes in this file are from Interpretml by Microsoft.
 
 
 def autogen_schema(X, ordinal_max_items=2, feature_names=None, feature_types=None):
@@ -918,7 +922,8 @@ class Native:
         bitsize = struct.calcsize("P") * 8
         is_64_bit = bitsize == 64
 
-        script_path = os.path.dirname(os.path.abspath(__file__))
+        # script_path = os.path.dirname(os.path.abspath(__file__))
+        script_path = pkg_resources.resource_filename('piml','models/ebm_module/ebm')
         package_path = script_path # os.path.join(script_path, "..", "..")
 
         debug_str = "" # "_debug" if debug else ""

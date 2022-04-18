@@ -7,7 +7,25 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
 
-def plot_regularization(data_dict_logs, log_scale=True, save_eps=False, save_png=False, folder="./results/", name="trajectory_plot"):
+def plot_regularization(data_dict_logs, log_scale=True, folder="./results/", name="regularization_path", save_eps=False, save_png=False):
+    """
+    Helper function for visualizing regularization path.
+
+    Parameters
+    ----------
+    data_dict_logs : dict
+        Dictionary containing regularization path information.
+    log_scale : boolean
+        Whether to use log scale for y-axis.
+    folder : str
+        The path of folder to save figure, by default "./".
+    name : str
+        Name of the file, by default "regularization_path".
+    save_png : boolean
+        Whether to save the plot in PNG format, by default False.
+    save_eps : boolean
+        Whether to save the plot in EPS format, by default False.
+    """
 
     main_loss = data_dict_logs["main_effect_val_loss"]
     inter_loss = data_dict_logs["interaction_val_loss"]
@@ -71,12 +89,32 @@ def plot_regularization(data_dict_logs, log_scale=True, save_eps=False, save_png
         fig.savefig("%s.png" % save_path, bbox_inches="tight", dpi=100)
 
 
-def plot_trajectory(data_dict_logs, log_scale=True, save_eps=False, save_png=False, folder="./results/", name="trajectory_plot"):
+def plot_trajectory(data_dict_logs, log_scale=True, folder="./", name="loss_trajectory", save_eps=False, save_png=False):
+    """
+    Helper function for visualizing loss trajectory.
 
+    Parameters
+    ----------
+    data_dict_logs : dict
+        Dictionary containing loss trajectory information.
+    log_scale : boolean
+        Whether to use log scale for y-axis.
+    folder : str
+        The path of folder to save figure, by default "./".
+    name : str
+        Name of the file, by default "trajectory_plot".
+    save_png : boolean
+        Whether to save the plot in PNG format, by default False.
+    save_eps : boolean
+        Whether to save the plot in EPS format, by default False.
+    """
     t1, t2, t3 = [data_dict_logs["err_train_main_effect_training"],
               data_dict_logs["err_train_interaction_training"], data_dict_logs["err_train_tuning"]]
-    v1, v2, v3= [data_dict_logs["err_val_main_effect_training"],
+    v1, v2, v3 = [data_dict_logs["err_val_main_effect_training"],
               data_dict_logs["err_val_interaction_training"], data_dict_logs["err_val_tuning"]]
+
+    if len(t1) + len(t2) + len(t3) == 0:
+        return
 
     fig = plt.figure(figsize=(14, 4))
     ax1 = plt.subplot(1, 2, 1)
@@ -130,23 +168,39 @@ def plot_trajectory(data_dict_logs, log_scale=True, save_eps=False, save_png=Fal
         fig.savefig("%s.png" % save_path, bbox_inches="tight", dpi=100)
 
 
-def feature_importance_visualize(data_dict_global, folder="./results/", name="demo", save_png=False, save_eps=False):
+def feature_importance_visualize(feature_importance, feature_names, folder="./", name="feature_importance", save_png=False, save_eps=False):
+    """
+    Helper function for visualizing feature importance.
 
+    Parameters
+    ----------
+    feature_importance : np.ndarray of shape (n_features, )
+        Feature importance based on Shapley value.
+    feature_names : list of str of shape (n_features, )
+        Feature name list.
+    folder : str
+        The path of folder to save figure, by default "./".
+    name : str
+        Name of the file, by default "feature_importance".
+    save_png : boolean
+        Whether to save the plot in PNG format, by default False.
+    save_eps : boolean
+        Whether to save the plot in EPS format, by default False.
+    """
     all_ir = []
     all_names = []
-    for key, item in data_dict_global.items():
-        if item["importance"] > 0:
-            all_ir.append(item["importance"])
-            all_names.append(key)
+    for name, importance in zip(feature_names, feature_importance):
+        if importance > 0:
+            all_ir.append(importance)
+            all_names.append(name)
 
     max_ids = len(all_names)
     if max_ids > 0:
-        fig = plt.figure(figsize=(0.4 + 0.6 * max_ids, 4))
+        fig = plt.figure(figsize=(0.4 + 0.65 * max_ids, 4))
         ax = plt.axes()
         ax.bar(np.arange(len(all_ir)), [ir for ir, _ in sorted(zip(all_ir, all_names))][::-1])
         ax.set_xticks(np.arange(len(all_ir)))
         ax.set_xticklabels([name for _, name in sorted(zip(all_ir, all_names))][::-1], rotation=60)
-        plt.xlabel("Feature Name", fontsize=12)
         plt.ylim(0, np.max(all_ir) + 0.05)
         plt.xlim(-1, len(all_names))
         plt.title("Feature Importance")
@@ -162,9 +216,78 @@ def feature_importance_visualize(data_dict_global, folder="./results/", name="de
             fig.savefig("%s.png" % save_path, bbox_inches="tight", dpi=100)
 
 
-def global_visualize_density(data_dict_global, main_effect_num=None, interaction_num=None, cols_per_row=4,
-                        save_png=False, save_eps=False, folder="./results/", name="demo"):
+def effect_importance_visualize(data_dict_global, folder="./", name="effect_importance", save_png=False, save_eps=False):
+    """
+    Helper function for visualizing effect importance.
 
+    Parameters
+    ----------
+    data_dict_global : dict
+        Dictionary with global explanation information.
+    folder : str
+        The path of folder to save figure, by default "./".
+    name : str
+        Name of the file, by default "effect_importance".
+    save_png : boolean
+        Whether to save the plot in PNG format, by default False.
+    save_eps : boolean
+        Whether to save the plot in EPS format, by default False.
+    """
+    all_ir = []
+    all_names = []
+    for key, item in data_dict_global.items():
+        if item["importance"] > 0:
+            all_ir.append(item["importance"])
+            all_names.append(key)
+
+    max_ids = len(all_names)
+    if max_ids > 0:
+        fig = plt.figure(figsize=(0.4 + 0.65 * max_ids, 4))
+        ax = plt.axes()
+        ax.bar(np.arange(len(all_ir)), [ir for ir, _ in sorted(zip(all_ir, all_names))][::-1])
+        ax.set_xticks(np.arange(len(all_ir)))
+        ax.set_xticklabels([name for _, name in sorted(zip(all_ir, all_names))][::-1], rotation=60)
+        plt.ylim(0, np.max(all_ir) + 0.05)
+        plt.xlim(-1, len(all_names))
+        plt.title("Effect Importance")
+
+        save_path = folder + name
+        if save_eps:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            fig.savefig("%s.eps" % save_path, bbox_inches="tight", dpi=100)
+        if save_png:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            fig.savefig("%s.png" % save_path, bbox_inches="tight", dpi=100)
+
+
+def global_visualize_density(data_dict_global, main_effect_num=None, interaction_num=None, cols_per_row=4,
+                        save_png=False, save_eps=False, folder="./", name="global_explain"):
+    """
+    Helper function for visualizing global explanation with density plots.
+
+    Parameters
+    ----------
+    data_dict_global : dict
+        Dictionary with global explanation information.
+    main_effect_num : int or None
+        The number of top main effects to show, by default None,
+        As main_effect_num=None, all main effects would be shown.
+    interaction_num : int or None
+        The number of top interactions to show, by default None,
+        As interaction_num=None, all main effects would be shown.
+    cols_per_row : int
+        The number of subfigures each row, by default 4.
+    folder : str
+        The path of folder to save figure, by default "./".
+    name : str
+        Name of the file, by default "global_explain".
+    save_png : boolean
+        Whether to save the plot in PNG format, by default False.
+    save_eps : boolean
+        Whether to save the plot in EPS format, by default False.
+    """
     maineffect_count = 0
     componment_scales = []
     for key, item in data_dict_global.items():
@@ -180,7 +303,7 @@ def global_visualize_density(data_dict_global, main_effect_num=None, interaction
     max_ids = len(active_univariate_index) + len(active_interaction_index)
 
     if max_ids == 0:
-        return 
+        return
 
     idx = 0
     fig = plt.figure(figsize=(6 * cols_per_row, 4.6 * int(np.ceil(max_ids / cols_per_row))))
@@ -233,61 +356,28 @@ def global_visualize_density(data_dict_global, main_effect_num=None, interaction
     for indice in active_interaction_index:
 
         feature_name = list(data_dict_global.keys())[indice]
-        feature_name1 = data_dict_global[feature_name]["feature_name1"]
-        feature_name2 = data_dict_global[feature_name]["feature_name2"]
         axis_extent = data_dict_global[feature_name]["axis_extent"]
 
-        inner = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=outer[idx],
-                                wspace=0.1, hspace=0.1, height_ratios=[6, 1], width_ratios=[0.6, 3, 0.15, 0.2])
-        ax_main = plt.Subplot(fig, inner[1])
+        ax_main = plt.Subplot(fig, outer[idx])
         interact_plot = ax_main.imshow(data_dict_global[feature_name]["outputs"], interpolation="nearest",
                              aspect="auto", extent=axis_extent)
-        ax_main.set_xticklabels([])
-        ax_main.set_yticklabels([])
-        ax_main.set_title(feature_name + " (" + str(np.round(100 * data_dict_global[feature_name]["importance"], 1)) + "%)", fontsize=12)
-        fig.add_subplot(ax_main)
 
-        ax_bottom = plt.Subplot(fig, inner[5])
         if data_dict_global[feature_name]["xtype"] == "categorical":
-            xint = np.arange(len(data_dict_global[feature_name1]["density"]["names"]))
-            ax_bottom.bar(xint, data_dict_global[feature_name1]["density"]["scores"])
-            ax_bottom.set_xticks(data_dict_global[feature_name]["input1_ticks"])
-            ax_bottom.set_xticklabels(data_dict_global[feature_name]["input1_labels"])
-        else:
-            xint = ((np.array(data_dict_global[feature_name1]["density"]["names"][1:])
-                  + np.array(data_dict_global[feature_name1]["density"]["names"][:-1])) / 2).reshape([-1])
-            ax_bottom.bar(xint, data_dict_global[feature_name1]["density"]["scores"], width=xint[1] - xint[0])
-        ax_bottom.set_yticklabels([])
-        ax_bottom.set_xlim([axis_extent[0], axis_extent[1]])
-        ax_bottom.get_shared_x_axes().join(ax_bottom, ax_main)
-        ax_bottom.autoscale()
-        fig.add_subplot(ax_bottom)
-        if len(str(ax_bottom.get_xticks())) > 60:
-            ax_bottom.xaxis.set_tick_params(rotation=20)
-
-        ax_left = plt.Subplot(fig, inner[0])
+            ax_main.set_xticks(data_dict_global[feature_name]["input1_ticks"])
+            ax_main.set_xticklabels(data_dict_global[feature_name]["input1_labels"])
         if data_dict_global[feature_name]["ytype"] == "categorical":
-            xint = np.arange(len(data_dict_global[feature_name2]["density"]["names"]))
-            ax_left.barh(xint, data_dict_global[feature_name2]["density"]["scores"])
-            ax_left.set_yticks(data_dict_global[feature_name]["input2_ticks"])
-            ax_left.set_yticklabels(data_dict_global[feature_name]["input2_labels"])
-        else:
-            xint = ((np.array(data_dict_global[feature_name2]["density"]["names"][1:])
-                  + np.array(data_dict_global[feature_name2]["density"]["names"][:-1])) / 2).reshape([-1])
-            ax_left.barh(xint, data_dict_global[feature_name2]["density"]["scores"], height=xint[1] - xint[0])
-        ax_left.set_xticklabels([])
-        ax_left.set_ylim([axis_extent[2], axis_extent[3]])
-        ax_left.get_shared_y_axes().join(ax_left, ax_main)
-        ax_left.autoscale()
-        fig.add_subplot(ax_left)
+            ax_main.set_yticks(data_dict_global[feature_name]["input2_ticks"])
+            ax_main.set_yticklabels(data_dict_global[feature_name]["input2_labels"])
 
-        ax_colorbar = plt.Subplot(fig, inner[2])
         response_precision = max(int(- np.log10(np.max(data_dict_global[feature_name]["outputs"])
                                    - np.min(data_dict_global[feature_name]["outputs"]))) + 2, 0)
-        fig.colorbar(interact_plot, cax=ax_colorbar, orientation="vertical",
+        ax_main.set_title(feature_name + " (" + str(np.round(100 * data_dict_global[feature_name]["importance"], 1)) + "%)", fontsize=12)
+        fig.add_subplot(ax_main)
+        fig.colorbar(interact_plot, ax=ax_main, orientation="vertical",
                      format="%0." + str(response_precision) + "f", use_gridspec=True)
-        fig.add_subplot(ax_colorbar)
         idx = idx + 1
+        if len(str(ax_main.get_xticks())) > 60:
+            ax_main.xaxis.set_tick_params(rotation=20)
 
     if max_ids > 0:
         save_path = folder + name
@@ -302,8 +392,31 @@ def global_visualize_density(data_dict_global, main_effect_num=None, interaction
 
 
 def global_visualize_wo_density(data_dict_global, main_effect_num=None, interaction_num=None, cols_per_row=4,
-                        save_png=False, save_eps=False, folder="./results/", name="demo"):
+                        save_png=False, save_eps=False, folder="./", name="global_explain"):
+    """
+    Helper function for visualizing global explanation without density plots.
 
+    Parameters
+    ----------
+    data_dict_global : dict
+        Dictionary with global explanation information.
+    main_effect_num : int or None
+        The number of top main effects to show, by default None,
+        As main_effect_num=None, all main effects would be shown.
+    interaction_num : int or None
+        The number of top interactions to show, by default None,
+        As interaction_num=None, all main effects would be shown.
+    cols_per_row : int
+        The number of subfigures each row, by default 4.
+    folder : str
+        The path of folder to save figure, by default "./".
+    name : str
+        Name of the file, by default "global_explain".
+    save_png : boolean
+        Whether to save the plot in PNG format, by default False.
+    save_eps : boolean
+        Whether to save the plot in EPS format, by default False.
+    """
     maineffect_count = 0
     componment_scales = []
     for key, item in data_dict_global.items():
@@ -366,11 +479,10 @@ def global_visualize_wo_density(data_dict_global, main_effect_num=None, interact
 
         response_precision = max(int(- np.log10(np.max(data_dict_global[feature_name]["outputs"])
                                    - np.min(data_dict_global[feature_name]["outputs"]))) + 2, 0)
-        fig.colorbar(interact_plot, ax=ax_main, orientation="vertical",
-                     format="%0." + str(response_precision) + "f", use_gridspec=True)
-
         ax_main.set_title(feature_name + " (" + str(np.round(100 * data_dict_global[feature_name]["importance"], 1)) + "%)", fontsize=12)
         fig.add_subplot(ax_main)
+        fig.colorbar(interact_plot, ax=ax_main, orientation="vertical",
+                     format="%0." + str(response_precision) + "f", use_gridspec=True)
 
         idx = idx + 1
         if len(str(ax_main.get_xticks())) > 60:
@@ -388,8 +500,23 @@ def global_visualize_wo_density(data_dict_global, main_effect_num=None, interact
             fig.savefig("%s.png" % save_path, bbox_inches="tight", dpi=100)
 
 
-def local_visualize(data_dict_local, folder="./results/", name="demo", save_png=False, save_eps=False):
+def local_visualize(data_dict_local, folder="./", name="local_explain", save_png=False, save_eps=False):
+    """
+    Helper function for visualizing local explanation.
 
+    Parameters
+    ----------
+    data_dict_local : dict
+        Dictionary with local explanation information.
+    folder : str
+        The path of folder to save figure, by default "./".
+    name : str
+        Name of the file, by default "local_explain".
+    save_png : boolean
+        Whether to save the plot in PNG format, by default False.
+    save_eps : boolean
+        Whether to save the plot in EPS format, by default False.
+    """
     idx = np.argsort(np.abs(data_dict_local["scores"][data_dict_local["active_indice"]]))[::-1]
 
     max_ids = len(data_dict_local["active_indice"])
