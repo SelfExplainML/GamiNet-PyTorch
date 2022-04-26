@@ -4,7 +4,7 @@ Generalized additive models with structured interactions; it was done when I was
 ## Installation 
 
 ```shell
-pip install git+https://github.com/ZebinYang/GAMINet-PyTorch.git
+pip install git+https://github.com/SelfExplainML/GamiNet-PyTorch
 ```
 
 ## Citations
