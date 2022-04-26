@@ -1,5 +1,5 @@
 #  GAMI-Net Pytorch version
-Generalized additive models with structured interactions; it was done when Zebin was PhD student in HKU.
+Generalized additive models with structured interactions - PyTorch version
 
 ## Installation 
 
