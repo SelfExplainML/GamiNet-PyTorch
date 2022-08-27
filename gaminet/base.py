@@ -249,8 +249,7 @@ class GAMINet(BaseEstimator):
         """
         pred = self.get_aggregate_output(self.validation_generator_.tensors[0],
                     main_effect=main_effect, interaction=interaction)
-        loss = self.loss_fn(pred.ravel(), self.validation_generator_.tensors[1].ravel() *
-                    self.validation_generator_.tensors[2].ravel())
+        loss = self.loss_fn(pred.ravel(), self.validation_generator_.tensors[1].ravel()) * self.validation_generator_.tensors[2]
         mean_loss = torch.mean(loss).cpu().detach().numpy().ravel()[0]
         return mean_loss
 
