@@ -99,6 +99,7 @@ class pyGAMNet(torch.nn.Module):
 
         super(pyGAMNet, self).__init__()
 
+        self.device = device
         self.nfeature_index_list = nfeature_index_list
         self.cfeature_index_list = cfeature_index_list
         self.num_classes_list = num_classes_list
@@ -113,7 +114,7 @@ class pyGAMNet(torch.nn.Module):
 
     def forward(self, inputs):
 
-        output = torch.zeros(size=(inputs.shape[0], inputs.shape[1]), dtype=torch.float)
+        output = torch.zeros(size=(inputs.shape[0], inputs.shape[1]), dtype=torch.float, device=self.device)
         if len(self.nfeature_index_list) > 0:
             ntensor_inputs = torch.unsqueeze(torch.transpose(inputs[:,
                                     self.nfeature_index_list], 0, 1), 2)
@@ -330,7 +331,7 @@ class pyGAMINet(torch.nn.Module):
         main_effect_outputs = None
         interaction_outputs = None
         inputs.requires_grad = True
-        outputs = self.output_bias * torch.ones(inputs.shape[0], 1)
+        outputs = self.output_bias * torch.ones(inputs.shape[0], 1, device=self.device)
         inputs = torch.max(torch.min(inputs, self.max_value), self.min_value) if self.boundary_clip else inputs
         inputs = (inputs - self.mu_list) / self.std_list
         if main_effect:
