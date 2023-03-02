@@ -922,8 +922,7 @@ class Native:
         bitsize = struct.calcsize("P") * 8
         is_64_bit = bitsize == 64
 
-        # script_path = os.path.dirname(os.path.abspath(__file__))
-        script_path = pkg_resources.resource_filename('piml','models/ebm_module/ebm')
+        script_path = os.path.dirname(os.path.abspath(__file__))
         package_path = script_path # os.path.join(script_path, "..", "..")
 
         debug_str = "" # "_debug" if debug else ""
