@@ -1702,9 +1702,7 @@ class GAMINet(BaseEstimator):
                 main_effect_inputs[:, idx] = np.linspace(self.min_value_[idx].cpu().numpy(),
                                          self.max_value_[idx].cpu().numpy(), main_grid_size)
                 main_effect_inputs_original = main_effect_inputs[:, [idx]]
-                main_effect_outputs = (self.net_.main_effect_weights.cpu().detach().numpy()[idx] *
-                               self.net_.main_effect_switcher.cpu().detach().numpy()[idx] *
-                               self.get_main_effect_raw_output(main_effect_inputs)[:, idx])
+                main_effect_outputs = self.get_main_effect_raw_output(main_effect_inputs)[:, idx]
                 data_dict_global[feature_name].update({"type": "continuous",
                                       "importance": componment_scales[idx],
                                       "inputs": main_effect_inputs_original.ravel(),
@@ -1713,9 +1711,7 @@ class GAMINet(BaseEstimator):
                 main_effect_inputs_original = self.dummy_values_[feature_name]
                 main_effect_inputs = np.zeros((len(main_effect_inputs_original), self.n_features_))
                 main_effect_inputs[:, idx] = np.arange(len(main_effect_inputs_original))
-                main_effect_outputs = (self.net_.main_effect_weights.cpu().detach().numpy()[idx] *
-                       self.net_.main_effect_switcher.cpu().detach().numpy()[idx] *
-                       self.get_main_effect_raw_output(main_effect_inputs)[:, idx])
+                main_effect_outputs = self.get_main_effect_raw_output(main_effect_inputs)[:, idx]
                 main_effect_input_ticks = (main_effect_inputs_original.ravel().astype(int)
                        if len(main_effect_inputs_original) <= 6
                        else np.linspace(0.1 * len(main_effect_inputs_original),
@@ -1789,9 +1785,7 @@ class GAMINet(BaseEstimator):
             interaction_inputs = np.zeros((x1.shape[0] * x1.shape[1], self.n_features_))
             interaction_inputs[:, self.interaction_list_[idx][0]] = x1.ravel()
             interaction_inputs[:, self.interaction_list_[idx][1]] = x2.ravel()
-            interact_outputs = (self.net_.interaction_weights.cpu().detach().numpy()[idx]
-                    * self.net_.interaction_switcher.cpu().detach().numpy()[idx]
-                    * self.get_interaction_raw_output(interaction_inputs))[:, idx].reshape(x1.shape)
+            interact_outputs = self.get_interaction_raw_output(interaction_inputs)[:, idx].reshape(x1.shape)
             data_dict_global.update({feature_name1 + " x " + feature_name2:
                                 {"feature_name1": feature_name1,
                                 "feature_name2": feature_name2,
