@@ -462,8 +462,6 @@ class GAMINetClassifier(GAMINet, ClassifierMixin):
         """
         num_classes = 2
         model_type = "classification"
-        scores = np.minimum(np.maximum(scores, 0.0000001), 0.9999999)
-        scores = np.log(scores / (1 - scores))
 
         interaction_list = self._interaction_screening(x, y.astype(np.int64), w,
                        scores, feature_names, feature_types, model_type, num_classes)
